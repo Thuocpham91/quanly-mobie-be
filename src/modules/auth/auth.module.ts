@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { MailModule } from '../mail/mail.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -23,6 +24,7 @@ import { BranchesModule } from '../branches/branches.module';
     TypeOrmModule.forFeature([Role, Permission, User, Branch, UserBranchRole]),
     forwardRef(() => UsersModule),
     BranchesModule,
+    MailModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

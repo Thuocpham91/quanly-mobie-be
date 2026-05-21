@@ -46,7 +46,6 @@ services:
     restart: always
     environment:
       ENVIRONMENT: ${ENVIRONMENT}
-      HOST: ${HOST}
       PORT: ${PORT}
 
       DB_USERNAME: ${DB_USERNAME}
@@ -62,9 +61,6 @@ services:
       VIRTUAL_PORT: ${VIRTUAL_PORT:-9003}
       LETSENCRYPT_HOST: ${LETSENCRYPT_HOST}
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
-
-      FRONTEND_URL: ${FRONTEND_URL}
-      BACKEND_URL: ${BACKEND_URL}
 
       MAIL_HOST: ${MAIL_HOST}
       MAIL_PORT: ${MAIL_PORT}
