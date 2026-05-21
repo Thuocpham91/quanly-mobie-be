@@ -7,6 +7,8 @@ import { User } from '../users/entities/user.entity';
 import { Branch } from '../branches/entities/branch.entity';
 import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
 import * as bcrypt from 'bcrypt';
+import { ConfigService } from '@nestjs/config';
+import { MailService } from '../mail/services/mail.service';
 
 @Injectable()
 export class PermissionsSeedService implements OnApplicationBootstrap {
@@ -21,6 +23,8 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
     private branchRepo: Repository<Branch>,
     @InjectRepository(UserBranchRole)
     private ubrRepo: Repository<UserBranchRole>,
+    private configService: ConfigService,
+    private mailService: MailService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -301,7 +305,8 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
     let admin = await this.userRepo.findOne({ where: { email } });
 
     if (!admin) {
-      const hashedPassword = await bcrypt.hash('admin', 10);
+      const rawPassword = Math.random().toString(36).slice(-8);
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
       admin = await this.userRepo.save(
         this.userRepo.create({
           email,
@@ -311,6 +316,22 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
         }),
       );
       console.log(`Created admin user: ${email}`);
+
+      const notifyEmail = this.configService.get<string>('ADMIN_NOTIFY_EMAIL');
+      if (notifyEmail) {
+        try {
+          await this.mailService.sendAdminCredentials(notifyEmail, {
+            email: email,
+            password: rawPassword,
+          });
+          console.log(`Sent generated admin credentials to ${notifyEmail}`);
+        } catch (error) {
+          console.error(`Failed to send credentials to ${notifyEmail}:`, error);
+        }
+      } else {
+        console.warn('ADMIN_NOTIFY_EMAIL is not set in .env. Password generated but not emailed.');
+        console.log(`[DEV ONLY] Admin Password: ${rawPassword}`);
+      }
     }
 
     const adminRole = await this.roleRepo.findOne({ where: { name: 'Admin' } });
