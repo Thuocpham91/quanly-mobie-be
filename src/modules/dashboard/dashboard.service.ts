@@ -49,7 +49,7 @@ export class DashboardService {
       SELECT COALESCE(SUM(ABS(il.quantity) * ib."costPrice"), 0) as "totalCost"
       FROM orders o
       INNER JOIN inventory_logs il ON o."orderCode" = il."referenceCode" AND il.type = 'SALE'
-      INNER JOIN inventory_batches ib ON il."batchId" = ib.id
+      INNER JOIN inventory_batches ib ON il."batchId"::uuid = ib.id
       WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
     `;
 
@@ -65,7 +65,7 @@ export class DashboardService {
       SELECT TO_CHAR(o."createdAt", 'YYYY-MM-DD') as date, COALESCE(SUM(ABS(il.quantity) * ib."costPrice"), 0) as cost
       FROM orders o
       INNER JOIN inventory_logs il ON o."orderCode" = il."referenceCode" AND il.type = 'SALE'
-      INNER JOIN inventory_batches ib ON il."batchId" = ib.id
+      INNER JOIN inventory_batches ib ON il."batchId"::uuid = ib.id
       WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
       GROUP BY TO_CHAR(o."createdAt", 'YYYY-MM-DD')
     `;

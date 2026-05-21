@@ -13,7 +13,7 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('statistics')
-  @Permissions('dashboard.view') // Assuming we might want to restrict this
+  @Permissions('dashboard.view')
   @ApiOperation({ summary: 'Get comprehensive dashboard statistics' })
   @ApiQuery({ name: 'startDate', required: false, description: 'Start date (YYYY-MM-DD)', type: String })
   @ApiQuery({ name: 'endDate', required: false, description: 'End date (YYYY-MM-DD)', type: String })
