@@ -3,10 +3,23 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { CustomersModule } from './customers/customers.module';
-import { PetsModule } from './pets/pets.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { BranchesModule } from './modules/branches/branches.module';
+import { LocationsModule } from './modules/locations/locations.module';
+import { CustomersModule } from './modules/customers/customers.module';
+import { PetsModule } from './modules/pets/pets.module';
+import { RoomsModule } from './modules/rooms/rooms.module';
+import { CagesModule } from './modules/cages/cages.module';
+import { ProductsModule } from './modules/products/products.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { ItemGroupsModule } from './modules/item-groups/item-groups.module';
+import { DistributorsModule } from './modules/distributors/distributors.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { FileModule } from './modules/file/file.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
 
 @Module({
   imports: [
@@ -29,8 +42,21 @@ import { PetsModule } from './pets/pets.module';
     }),
     AuthModule,
     UsersModule,
+    BranchesModule,
+    LocationsModule,
     CustomersModule,
     PetsModule,
+    RoomsModule,
+    CagesModule,
+    ProductsModule,
+    InventoryModule,
+    CategoriesModule,
+    ItemGroupsModule,
+    DistributorsModule,
+    NotificationsModule,
+    OrdersModule,
+    FileModule,
+    AppointmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

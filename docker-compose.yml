@@ -33,6 +33,7 @@ services:
     networks:
       - gasy-network
 
+
   quanly-pk-be-service:
     build:
       dockerfile: Dockerfile
@@ -52,7 +53,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_DATABASE: ${DB_DATABASE}
       DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
+      DB_PORT: 5432
 
       SECRETKEY: ${SECRETKEY}
       EXPIRESIN: ${EXPIRESIN}
