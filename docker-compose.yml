@@ -47,6 +47,7 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT}
       PORT: ${PORT}
+      ADMIN_NOTIFY_EMAIL: ${ADMIN_NOTIFY_EMAIL}
 
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
