@@ -76,12 +76,12 @@ export class MailService {
 
   async sendAdminCredentials(
     to: string,
-    credentials: { email: string; password: string },
+    credentials: { email: string; password: string; loginUrl: string },
   ): Promise<void> {
     this.logger.log(`Sending admin credentials mail to ${to}`);
     await this.mailerService.sendMail({
       to,
-      subject: 'Thông tin tài khoản Admin mới',
+      subject: 'Thông tin tài khoản của bạn',
       template: 'admin-credentials',
       context: credentials,
     });

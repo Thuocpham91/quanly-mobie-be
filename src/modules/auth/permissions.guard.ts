@@ -41,27 +41,36 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    // Admin has all permissions (fallback if needed, or based on role name)
-    // Here we check specifically for the role and its permissions in the current branch
-    
-    const userBranchRole = await this.userBranchRoleRepo.findOne({
-      where: { userId: user.id || user.sub, branchId: branchId as string },
-      relations: ['role', 'role.permissions'],
-    });
+    let userBranchRole: any;
 
-    if (!userBranchRole) {
-      this.logger.warn(`No role found for user ${user.email} in branch ${branchId}`);
-      throw new ForbiddenException('Bạn không có quyền truy cập chi nhánh này');
+    if (branchId) {
+      // Có branchId → tìm đúng chi nhánh
+      userBranchRole = await this.userBranchRoleRepo.findOne({
+        where: { userId: user.id || user.sub, branchId: branchId as string },
+        relations: ['role', 'role.permissions'],
+      });
+    } else {
+      // Không có branchId (xem tất cả chi nhánh) → lấy role đầu tiên của user
+      userBranchRole = await this.userBranchRoleRepo.findOne({
+        where: { userId: user.id || user.sub },
+        relations: ['role', 'role.permissions'],
+        order: { createdAt: 'ASC' },
+      });
     }
 
-    const userPermissions = userBranchRole.role.permissions.map(p => p.name);
+    if (!userBranchRole) {
+      this.logger.warn(`No role found for user ${user?.email}`);
+      throw new ForbiddenException('Bạn chưa được phân quyền vào chi nhánh nào');
+    }
 
-    // Special case for Admin role name
+    // Admin role bypass
     if (userBranchRole.role.name === 'Admin') {
       return true;
     }
 
-    const hasPermission = requiredPermissions.every(permission => userPermissions.includes(permission));
+    const userPermissions = userBranchRole.role.permissions.map((p: any) => p.name);
+    // OR logic: chỉ cần có ít nhất 1 trong các quyền được khai báo
+    const hasPermission = requiredPermissions.some(permission => userPermissions.includes(permission));
 
     if (!hasPermission) {
       throw new ForbiddenException('Bạn không có quyền thực hiện hành động này');

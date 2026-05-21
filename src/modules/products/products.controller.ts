@@ -17,7 +17,7 @@ export class ProductsController {
   }
 
   @Get()
-  @Permissions('products.view')
+  @Permissions('products.view', 'sales.create')
   findAll(@Query('isService') isService?: string) {
     let filterIsService: boolean | undefined = undefined;
     if (isService === 'true') filterIsService = true;

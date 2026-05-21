@@ -13,7 +13,9 @@ export class AuthService {
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findOneByEmail(email);
     if (user && (await bcrypt.compare(pass, user.password))) {
-      const { password, ...result } = user;
+      // Load full user with branch roles
+      const fullUser = await this.usersService.findOneById(user.id);
+      const { password, ...result } = fullUser as any;
       return result;
     }
     return null;

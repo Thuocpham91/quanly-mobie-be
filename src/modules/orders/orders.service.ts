@@ -104,7 +104,7 @@ export class OrdersService {
     return savedOrder;
   }
 
-  async findAll(branchId: string, page = 1, limit = 10, petId?: string, customerId?: string): Promise<{ data: Order[]; total: number }> {
+  async findAll(branchId: string, page = 1, limit = 10, petId?: string, customerId?: string, createdById?: string): Promise<{ data: Order[]; total: number }> {
     const where: any = {};
     if (branchId && branchId !== 'undefined' && branchId !== 'null') {
       where.branchId = branchId;
@@ -114,6 +114,10 @@ export class OrdersService {
     }
     if (customerId) {
       where.customerId = customerId;
+    }
+    // Lọc theo người tạo nếu không có quyền xem tất cả
+    if (createdById) {
+      where.createdById = createdById;
     }
 
     const [data, total] = await this.ordersRepository.findAndCount({

@@ -3,6 +3,8 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 
+import { LoginDto, RegisterDto } from './dto/auth.dto';
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -12,7 +14,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: any) {
+  async login(@Body() loginDto: LoginDto) {
     const user = await this.authService.validateUser(loginDto.email, loginDto.password);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -21,7 +23,7 @@ export class AuthController {
   }
 
   @Post('register')
-  async register(@Body() registerDto: any) {
+  async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 

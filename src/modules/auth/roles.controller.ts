@@ -4,6 +4,8 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { PermissionsGuard } from './permissions.guard';
 import { Permissions } from './permissions.decorator';
 
+import { CreateRoleDto, UpdateRoleDto } from './dto/roles.dto';
+
 @Controller('roles')
 @UseGuards(JwtAuthGuard)
 export class RolesController {
@@ -25,12 +27,12 @@ export class RolesController {
   }
 
   @Post()
-  create(@Body() data: { name: string; description?: string; permissionIds: string[] }) {
+  create(@Body() data: CreateRoleDto) {
     return this.rolesService.create(data);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() data: { name?: string; description?: string; permissionIds?: string[] }) {
+  update(@Param('id') id: string, @Body() data: UpdateRoleDto) {
     return this.rolesService.update(id, data);
   }
 

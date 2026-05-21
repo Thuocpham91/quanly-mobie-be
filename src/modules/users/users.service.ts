@@ -1,10 +1,12 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { Branch } from '../branches/entities/branch.entity';
+import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
 import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 import { MailService } from '../mail/services/mail.service';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -14,7 +16,10 @@ export class UsersService {
     private usersRepository: Repository<User>,
     @InjectRepository(Branch)
     private branchesRepository: Repository<Branch>,
+    @InjectRepository(UserBranchRole)
+    private userBranchRoleRepository: Repository<UserBranchRole>,
     private mailService: MailService,
+    private configService: ConfigService,
   ) {}
 
   async findOneByEmail(email: string): Promise<User | undefined> {
@@ -29,6 +34,7 @@ export class UsersService {
         'userBranchRoles',
         'userBranchRoles.branch',
         'userBranchRoles.role',
+        'userBranchRoles.role.permissions',  // ← load permissions để phân quyền menu
       ],
     });
     return user || undefined;
@@ -83,22 +89,37 @@ export class UsersService {
 
     const savedUser = await this.usersRepository.save(user);
 
-    // TODO: Handle branchRoleAssignments if provided
-    // This will be implemented in a separate endpoint or method
+    // Lưu branchRoleAssignments
+    if (branchRoleAssignments && branchRoleAssignments.length > 0) {
+      const assignments = branchRoleAssignments
+        .filter((a: any) => a.branchId && a.roleId)
+        .map((a: any) =>
+          this.userBranchRoleRepository.create({
+            userId: savedUser.id,
+            branchId: a.branchId,
+            roleId: a.roleId,
+          }),
+        );
+      if (assignments.length > 0) {
+        await this.userBranchRoleRepository.save(assignments);
+      }
+    }
 
     // Send the password via email
     if (userData.email) {
       try {
+        const loginUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
         await this.mailService.sendAdminCredentials(userData.email, {
           email: userData.email,
           password: rawPassword,
+          loginUrl,
         });
       } catch (error) {
         console.error('Failed to send credentials email:', error);
       }
     }
 
-    return savedUser;
+    return this.findOneById(savedUser.id) as Promise<User>;
   }
 
   async update(id: string, userData: Partial<User>): Promise<User> {
@@ -113,8 +134,31 @@ export class UsersService {
 
     const { branchRoleAssignments, ...rest } = userData as any;
     Object.assign(user, rest);
+    await this.usersRepository.save(user);
 
-    return this.usersRepository.save(user);
+    // Cập nhật branchRoleAssignments: xoá cũ → thêm mới
+    if (branchRoleAssignments !== undefined) {
+      // Xoá tất cả assignments cũ của user này
+      await this.userBranchRoleRepository.delete({ userId: id });
+
+      // Thêm assignments mới
+      if (branchRoleAssignments.length > 0) {
+        const newAssignments = branchRoleAssignments
+          .filter((a: any) => a.branchId && a.roleId)
+          .map((a: any) =>
+            this.userBranchRoleRepository.create({
+              userId: id,
+              branchId: a.branchId,
+              roleId: a.roleId,
+            }),
+          );
+        if (newAssignments.length > 0) {
+          await this.userBranchRoleRepository.save(newAssignments);
+        }
+      }
+    }
+
+    return this.findOneById(id) as Promise<User>;
   }
 
   async remove(id: string): Promise<void> {

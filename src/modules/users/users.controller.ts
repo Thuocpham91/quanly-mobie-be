@@ -22,6 +22,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @Permissions('users.manage')
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto as any);
   }
@@ -43,11 +44,13 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @Permissions('users.manage')
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.update(id, updateUserDto as any);
   }
 
   @Delete(':id')
+  @Permissions('users.manage')
   remove(@Param('id') id: string) {
     return this.usersService.remove(id);
   }
