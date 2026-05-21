@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 import { Pet } from '../../pets/entities/pet.entity';
 import { Customer } from '../../customers/entities/customer.entity';
+import { User } from '../../users/entities/user.entity';
 
 export enum AppointmentStatus {
   PENDING = 'PENDING',
@@ -31,6 +32,12 @@ export class Appointment {
 
   @ManyToOne('Branch', { nullable: true, onDelete: 'SET NULL' })
   branch: any;
+
+  @Column({ nullable: true })
+  userId: string;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  user: User;
 
   @Column({ type: 'timestamp' })
   dateTime: Date;

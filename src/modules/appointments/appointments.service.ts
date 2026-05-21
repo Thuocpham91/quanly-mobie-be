@@ -4,17 +4,34 @@ import { Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
 import { CreateAppointmentDto, UpdateAppointmentDto } from './dto/appointment.dto';
 import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class AppointmentsService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentsRepository: Repository<Appointment>,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   async create(createAppointmentDto: CreateAppointmentDto): Promise<Appointment> {
     const appointment = this.appointmentsRepository.create(createAppointmentDto);
-    return this.appointmentsRepository.save(appointment);
+    const saved = await this.appointmentsRepository.save(appointment);
+    if (saved.userId) {
+      try {
+        this.notificationsGateway.sendNotificationToUser(saved.userId, {
+          type: 'info',
+          message: `Bạn được giao công việc mới: ${saved.purpose}`,
+          timestamp: new Date().toISOString(),
+          data: {
+            appointmentId: saved.id,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to send task assignment notification:', err);
+      }
+    }
+    return saved;
   }
 
   async findAll(branchId?: string, page: number = 1, limit: number = 10): Promise<PaginatedResult<Appointment>> {
@@ -26,7 +43,7 @@ export class AppointmentsService {
 
     const [data, total] = await this.appointmentsRepository.findAndCount({
       where: whereClause,
-      relations: ['pet', 'customer'],
+      relations: ['pet', 'customer', 'user'],
       order: { dateTime: 'ASC' },
       skip,
       take: limit,
@@ -46,7 +63,7 @@ export class AppointmentsService {
   async findOne(id: string): Promise<Appointment> {
     const appointment = await this.appointmentsRepository.findOne({
       where: { id },
-      relations: ['pet', 'customer'],
+      relations: ['pet', 'customer', 'user'],
     });
     if (!appointment) {
       throw new NotFoundException(`Appointment with ID ${id} not found`);

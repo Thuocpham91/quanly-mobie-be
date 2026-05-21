@@ -6,6 +6,8 @@ import { OrderItem } from './entities/order-item.entity';
 import { CreateOrderDto } from './dto/order.dto';
 import { InventoryService } from '../inventory/inventory.service';
 import { Customer } from '../customers/entities/customer.entity';
+import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class OrdersService {
@@ -16,7 +18,10 @@ export class OrdersService {
     private readonly orderItemsRepository: Repository<OrderItem>,
     @InjectRepository(Customer)
     private readonly customersRepository: Repository<Customer>,
+    @InjectRepository(UserBranchRole)
+    private readonly userBranchRoleRepository: Repository<UserBranchRole>,
     private readonly inventoryService: InventoryService,
+    private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, branchId: string, userId: string): Promise<Order> {
@@ -99,6 +104,51 @@ export class OrdersService {
           walletBalance: currentBalance + walletCreditAmount,
         });
       }
+    }
+
+    // Gửi thông báo thời gian thực nếu người tạo là Nhân viên
+    try {
+      const creatorRole = await this.userBranchRoleRepository.findOne({
+        where: { userId, branchId, isActive: true },
+        relations: ['role', 'user'],
+      });
+
+      if (creatorRole && creatorRole.role.name === 'Nhân viên') {
+        // Tìm tất cả quản lý thuộc chi nhánh này
+        const branchManagers = await this.userBranchRoleRepository.find({
+          where: { branchId, role: { name: 'Quản lý' }, isActive: true },
+        });
+
+        // Tìm tất cả admin trong hệ thống
+        const admins = await this.userBranchRoleRepository.find({
+          where: { role: { name: 'Admin' }, isActive: true },
+        });
+
+        // Kết hợp danh sách người nhận (loại bỏ trùng lặp)
+        const recipientIds = new Set<string>();
+        branchManagers.forEach((m) => recipientIds.add(m.userId));
+        admins.forEach((a) => recipientIds.add(a.userId));
+
+        // Loại bỏ chính người tạo khỏi danh sách nhận thông báo
+        recipientIds.delete(userId);
+
+        const creatorName = creatorRole.user?.fullName || 'Nhân viên';
+        const orderMessage = `${creatorName} vừa tạo đơn hàng mới ${savedOrder.orderCode} trị giá ${savedOrder.totalAmount.toLocaleString('vi-VN')}đ`;
+
+        for (const recipientId of recipientIds) {
+          this.notificationsGateway.sendNotificationToUser(recipientId, {
+            type: 'success',
+            message: orderMessage,
+            timestamp: new Date().toISOString(),
+            data: {
+              orderId: savedOrder.id,
+              orderCode: savedOrder.orderCode,
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to trigger order creation notifications:', err);
     }
 
     return savedOrder;

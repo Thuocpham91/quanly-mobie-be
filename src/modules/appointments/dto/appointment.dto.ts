@@ -25,6 +25,10 @@ export class CreateAppointmentDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  userId?: string;
 }
 
 export class UpdateAppointmentDto {
@@ -43,4 +47,8 @@ export class UpdateAppointmentDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  userId?: string;
 }
