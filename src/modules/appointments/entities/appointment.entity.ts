@@ -15,16 +15,16 @@ export class Appointment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ nullable: true })
   petId: string;
 
-  @ManyToOne(() => Pet, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Pet, { onDelete: 'CASCADE', nullable: true })
   pet: Pet;
 
-  @Column()
+  @Column({ nullable: true })
   customerId: string;
 
-  @ManyToOne(() => Customer, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Customer, { onDelete: 'CASCADE', nullable: true })
   customer: Customer;
 
   @Column({ nullable: true })
@@ -41,6 +41,9 @@ export class Appointment {
 
   @Column({ type: 'timestamp' })
   dateTime: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  endDateTime: Date;
 
   @Column()
   purpose: string;

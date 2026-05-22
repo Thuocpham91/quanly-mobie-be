@@ -3,12 +3,12 @@ import { AppointmentStatus } from '../entities/appointment.entity';
 
 export class CreateAppointmentDto {
   @IsString()
-  @IsNotEmpty()
-  petId: string;
+  @IsOptional()
+  petId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  customerId: string;
+  @IsOptional()
+  customerId?: string;
 
   @IsString()
   @IsOptional()
@@ -17,6 +17,10 @@ export class CreateAppointmentDto {
   @IsDateString()
   @IsNotEmpty()
   dateTime: string;
+
+  @IsDateString()
+  @IsOptional()
+  endDateTime?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -35,6 +39,10 @@ export class UpdateAppointmentDto {
   @IsDateString()
   @IsOptional()
   dateTime?: string;
+
+  @IsDateString()
+  @IsOptional()
+  endDateTime?: string;
 
   @IsString()
   @IsOptional()
