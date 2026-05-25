@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Headers } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto, UpdateCustomerDto } from './dto/customer.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -15,7 +15,10 @@ export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Post()
-  create(@Body() createCustomerDto: CreateCustomerDto) {
+  create(@Body() createCustomerDto: CreateCustomerDto, @Headers('x-branch-id') headerBranchId?: string) {
+    if (!createCustomerDto.branchId && headerBranchId) {
+      createCustomerDto.branchId = headerBranchId;
+    }
     return this.customersService.create(createCustomerDto);
   }
 
@@ -49,7 +52,10 @@ export class CustomersController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto) {
+  update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto, @Headers('x-branch-id') headerBranchId?: string) {
+    if (!updateCustomerDto.branchId && headerBranchId) {
+      updateCustomerDto.branchId = headerBranchId;
+    }
     return this.customersService.update(id, updateCustomerDto);
   }
 

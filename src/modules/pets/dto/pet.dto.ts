@@ -70,6 +70,10 @@ export class CreatePetDto {
   @IsOptional()
   notes?: string;
 
+  @IsString()
+  @IsOptional()
+  branchId?: string;
+
   @IsUUID()
   @IsNotEmpty()
   ownerId: string;
@@ -143,4 +147,8 @@ export class UpdatePetDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  branchId?: string;
 }

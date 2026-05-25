@@ -48,8 +48,11 @@ export class PetsService {
     const { ownerId, ...details } = petData;
     const owner = await this.customersService.findOne(ownerId);
     
+    const branchId = details.branchId || owner?.branchId;
+    
     const pet = this.petsRepository.create({
       ...details,
+      branchId,
       owner,
     } as DeepPartial<Pet>);
     

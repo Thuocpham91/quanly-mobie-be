@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, Headers } from '@nestjs/common';
 import { PetsService } from './pets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePetDto, UpdatePetDto } from './dto/pet.dto';
@@ -9,7 +9,10 @@ export class PetsController {
   constructor(private readonly petsService: PetsService) {}
 
   @Post()
-  create(@Body() createPetDto: CreatePetDto) {
+  create(@Body() createPetDto: CreatePetDto, @Headers('x-branch-id') headerBranchId?: string) {
+    if (!createPetDto.branchId && headerBranchId) {
+      createPetDto.branchId = headerBranchId;
+    }
     return this.petsService.create(createPetDto);
   }
 
@@ -30,7 +33,10 @@ export class PetsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updatePetDto: UpdatePetDto) {
+  update(@Param('id') id: string, @Body() updatePetDto: UpdatePetDto, @Headers('x-branch-id') headerBranchId?: string) {
+    if (!updatePetDto.branchId && headerBranchId) {
+      updatePetDto.branchId = headerBranchId;
+    }
     return this.petsService.update(id, updatePetDto);
   }
 

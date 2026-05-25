@@ -58,9 +58,22 @@ export class OrdersService {
     const totalAmount = subTotal - discount;
     const walletCreditAmount = Number(createOrderDto.walletCreditAmount) || 0;
 
-    // Generate Order Code
-    const count = await this.ordersRepository.count({ where: { branchId } });
-    const orderCode = `ORD-${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${(count + 1).toString().padStart(4, '0')}`;
+    // Generate Order Code globally for the current month/year to prevent unique key constraint conflicts across branches
+    const yearMonth = `${new Date().getFullYear()}${(new Date().getMonth() + 1).toString().padStart(2, '0')}`;
+    const latestOrder = await this.ordersRepository.createQueryBuilder('order')
+      .where('order.orderCode LIKE :prefix', { prefix: `ORD-${yearMonth}-%` })
+      .orderBy('order.orderCode', 'DESC')
+      .getOne();
+
+    let nextNumber = 1;
+    if (latestOrder) {
+      const parts = latestOrder.orderCode.split('-');
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq)) {
+        nextNumber = lastSeq + 1;
+      }
+    }
+    const orderCode = `ORD-${yearMonth}-${nextNumber.toString().padStart(4, '0')}`;
 
     const order = this.ordersRepository.create({
       orderCode,
