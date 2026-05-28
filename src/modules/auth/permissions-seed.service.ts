@@ -50,23 +50,8 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
       { name: 'customers.view',        displayName: 'Khách hàng',              module: 'Tổng quan' },
       { name: 'customers.create_edit', displayName: 'Thêm / Sửa khách hàng',  module: 'Tổng quan' },
       { name: 'customers.delete',      displayName: 'Xóa khách hàng',         module: 'Tổng quan' },
-      { name: 'pets.view',             displayName: 'Thú cưng',                module: 'Tổng quan' },
-      { name: 'pets.create_edit',      displayName: 'Thêm / Sửa thú cưng',    module: 'Tổng quan' },
-      { name: 'pets.delete',           displayName: 'Xóa thú cưng',           module: 'Tổng quan' },
       { name: 'appointments.view',     displayName: 'Công việc',                module: 'Tổng quan' },
       { name: 'appointments.manage',   displayName: 'Thêm / Sửa công việc',    module: 'Tổng quan' },
-
-      // ══════════════════════════════════════
-      // NHÓM: NỘI TRÚ / CHUỒNG TRẠI (GỘP VÀO TỔNG QUAN)
-      // ══════════════════════════════════════
-      { name: 'boarding.view',          displayName: 'Xem nội trú',              module: 'Tổng quan' },
-      { name: 'boarding.manage',        displayName: 'Thêm / Sửa nội trú',      module: 'Tổng quan' },
-      { name: 'boarding.delete',        displayName: 'Xóa nội trú',             module: 'Tổng quan' },
-      { name: 'boarding.payment',       displayName: 'Tạm ứng',                  module: 'Tổng quan' },
-      { name: 'boarding.view_health',   displayName: 'Xem sức khỏe thú cưng',  module: 'Tổng quan' },
-      { name: 'boarding.edit_health',   displayName: 'Cập nhật sức khỏe',       module: 'Tổng quan' },
-      { name: 'boarding.checkout',      displayName: 'Trả thú cưng',            module: 'Tổng quan' },
-      { name: 'boarding.view_history',  displayName: 'Lịch sử nội trú',          module: 'Tổng quan' },
 
       // ══════════════════════════════════════
       // NHÓM: BÁN HÀNG
@@ -86,6 +71,8 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
       { name: 'history.edit_order', displayName: 'Sửa đơn hàng',              module: 'Bán hàng' },
       { name: 'history.cancel_order',displayName: 'Hủy đơn hàng',            module: 'Bán hàng' },
       { name: 'history.delete_draft',displayName: 'Xóa đơn lưu tạm',         module: 'Bán hàng' },
+      { name: 'service_orders.view',   displayName: 'Xem đơn hàng dịch vụ',      module: 'Bán hàng' },
+      { name: 'service_orders.manage', displayName: 'Quản lý đơn hàng dịch vụ',  module: 'Bán hàng' },
 
       // ══════════════════════════════════════
       // NHÓM: KHO HÀNG
@@ -159,13 +146,12 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
     const quanLyPerms = [
       'dashboard.view',
       'customers.view', 'customers.delete',
-      'pets.view', 'pets.delete',
       'appointments.view', 'appointments.manage',
-      'boarding.view', 'boarding.manage', 'boarding.payment', 'boarding.view_health', 'boarding.edit_health', 'boarding.checkout', 'boarding.view_history', 'boarding.delete',
       'sales.create', 'sales.edit_date', 'sales.edit_discount',
       'sales.edit_price', 'sales.payment', 'sales.exam',
       'sales.view_others', 'sales.sell_expired', 'sales.print_draft', 'sales.edit_seller',
       'history.view', 'history.view_others', 'history.edit_order',
+      'service_orders.view', 'service_orders.manage',
       'history.view_exams', 'history.edit_exam', 'history.view_vaccines', 'history.edit_vaccine',
       'history.cancel_order', 'history.delete_draft', 'history.view_grooming', 'history.edit_grooming',
       'history.view_boarding',
@@ -182,13 +168,12 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
     const nhanVienPerms = [
       'dashboard.view',
       'customers.view',
-      'pets.view',
       'appointments.view', 'appointments.manage',
-      'boarding.view', 'boarding.manage', 'boarding.view_health',
       'sales.create', 'sales.payment', 'sales.exam', 'sales.print_draft',
       'history.view', 'history.view_exams', 'history.view_vaccines',
       'history.view_grooming', 'history.view_boarding',
       'products.view',
+      'service_orders.view', 'service_orders.manage',
     ];
 
     for (const r of defaultRoles) {

@@ -21,6 +21,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { FileModule } from './modules/file/file.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ServiceOrdersModule } from './modules/service-orders/service-orders.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     FileModule,
     AppointmentsModule,
     DashboardModule,
+    ServiceOrdersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
