@@ -43,8 +43,8 @@ export class ServiceOrdersService {
       ...createDto,
       orderCode,
       branchId,
-      appointmentDate: createDto.appointmentDate ? new Date(createDto.appointmentDate) : null,
-      deadline: createDto.deadline ? new Date(createDto.deadline) : null,
+      appointmentDate: createDto.appointmentDate ? new Date(createDto.appointmentDate) : undefined,
+      deadline: createDto.deadline ? new Date(createDto.deadline) : undefined,
     });
 
     return this.serviceOrdersRepository.save(serviceOrder);
