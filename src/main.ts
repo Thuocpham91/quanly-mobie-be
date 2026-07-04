@@ -5,21 +5,39 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors();
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    transform: true,
-    exceptionFactory: (errors) => {
-      console.error('--- VALIDATION ERROR ---');
-      errors.forEach(err => {
-        console.error(`Property: ${err.property}`);
-        console.error(`Constraints:`, err.constraints);
-      });
-      console.error('------------------------');
-      const messages = errors.map(error => Object.values(error.constraints || {})).flat();
-      return new BadRequestException(messages);
+  const corsOriginsEnv = process.env.CORS_ORIGINS;
+  let corsOrigins: boolean | string | string[] = true;
+  if (corsOriginsEnv) {
+    if (corsOriginsEnv.trim() === '*') {
+      corsOrigins = '*';
+    } else {
+      corsOrigins = corsOriginsEnv.split(',').map((origin) => origin.trim());
     }
-  }));
+  }
+
+  app.enableCors({
+    origin: corsOrigins,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      exceptionFactory: (errors) => {
+        console.error('--- VALIDATION ERROR ---');
+        errors.forEach((err) => {
+          console.error(`Property: ${err.property}`);
+          console.error(`Constraints:`, err.constraints);
+        });
+        console.error('------------------------');
+        const messages = errors
+          .map((error) => Object.values(error.constraints || {}))
+          .flat();
+        return new BadRequestException(messages);
+      },
+    }),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('API Documentation')
