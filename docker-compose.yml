@@ -33,7 +33,6 @@ services:
     networks:
       - gasy-network
 
-
   quanly-mobie-be-service:
     build:
       dockerfile: Dockerfile
