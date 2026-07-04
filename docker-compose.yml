@@ -6,10 +6,10 @@ volumes:
   html:
 
 services:
-  quanly-mobile-be-service-db:
+  quanly-mobie-be-service-db:
     image: postgres:15
     platform: linux/x86_64
-    container_name: quanly-mobile-be-service-db
+    container_name: quanly-mobie-be-service-db
     ports:
       - '${DB_PORT}:5432'
     environment:
@@ -17,7 +17,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_DATABASE}
-      VIRTUAL_PATH: /quanly-mobile-be-service-db
+      VIRTUAL_PATH: /quanly-mobie-be-service-db
       CORS_ORIGINS: ${CORS_ORIGINS}
       VIRTUAL_HOST: ${VIRTUAL_HOST}
       VIRTUAL_PORT: ${VIRTUAL_PORT:-5432}
@@ -34,13 +34,13 @@ services:
       - gasy-network
 
 
-  quanly-mobile-be-service:
+  quanly-mobie-be-service:
     build:
       dockerfile: Dockerfile
-    image: quanly-mobile-be-service:latest
-    container_name: quanly-mobile-be-service
+    image: quanly-mobie-be-service:latest
+    container_name: quanly-mobie-be-service
     depends_on:
-      - quanly-mobile-be-service-db
+      - quanly-mobie-be-service-db
     ports:
       - '${PORT}:${PORT}'
     restart: always
