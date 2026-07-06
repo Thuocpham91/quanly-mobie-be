@@ -21,10 +21,6 @@ export class CreateOrderDto {
   @IsOptional()
   customerId?: string;
 
-  @IsString()
-  @IsOptional()
-  petId?: string;
-
   @IsEnum(OrderStatus)
   @IsOptional()
   status?: OrderStatus;

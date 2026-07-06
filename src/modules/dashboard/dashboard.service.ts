@@ -5,9 +5,7 @@ import { Order } from '../orders/entities/order.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { InventoryLog } from '../inventory/entities/inventory-log.entity';
 import { Customer } from '../customers/entities/customer.entity';
-import { Pet } from '../pets/entities/pet.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
-import { Cage } from '../cages/entities/cage.entity';
 import { InventoryBatch } from '../inventory/entities/inventory-batch.entity';
 
 @Injectable()
@@ -17,9 +15,7 @@ export class DashboardService {
     @InjectRepository(OrderItem) private orderItemsRepo: Repository<OrderItem>,
     @InjectRepository(InventoryLog) private logsRepo: Repository<InventoryLog>,
     @InjectRepository(Customer) private customersRepo: Repository<Customer>,
-    @InjectRepository(Pet) private petsRepo: Repository<Pet>,
     @InjectRepository(Appointment) private appointmentsRepo: Repository<Appointment>,
-    @InjectRepository(Cage) private cagesRepo: Repository<Cage>,
     @InjectRepository(InventoryBatch) private batchesRepo: Repository<InventoryBatch>,
   ) {}
 
@@ -73,9 +69,6 @@ export class DashboardService {
     // --- 3. CUSTOMERS ---
     const allCustomers = await this.customersRepo.count();
 
-    // --- 4. PETS ---
-    const petsQuery = `SELECT species, COUNT(id) as count FROM pets GROUP BY species`;
-
     // --- 5. APPOINTMENTS ---
     let apptBranchCond = '';
     if (branchId && branchId !== 'undefined' && branchId !== 'null') apptBranchCond = 'AND "branchId" = $3';
@@ -85,11 +78,6 @@ export class DashboardService {
       WHERE "createdAt" >= $1 AND "createdAt" <= $2 ${apptBranchCond}
       GROUP BY status
     `;
-
-    // --- 6. CAGES (Current Status) ---
-    // Cages are physical, they usually belong to rooms which belong to branches.
-    // If cage doesn't have branchId directly, we just count all cages for now or ignore branch filter for cages if complex.
-    const cagesQuery = `SELECT status, COUNT(id) as count FROM cages GROUP BY status`;
 
     // --- 7. TOP PRODUCTS ---
     const topProductsQuery = `
@@ -128,15 +116,13 @@ export class DashboardService {
     // EXECUTE QUERIES
     const [
       totalsResult, cogsResult, chartRevenueResult, chartCostResult,
-      petsResult, apptsResult, cagesResult, topProductsResult, lowStockResult
+      apptsResult, topProductsResult, lowStockResult
     ] = await Promise.all([
       this.ordersRepo.query(totalsQuery, params),
       this.ordersRepo.query(cogsQuery, params),
       this.ordersRepo.query(chartQuery, params),
       this.ordersRepo.query(costChartQuery, params),
-      this.petsRepo.query(petsQuery),
       this.appointmentsRepo.query(apptsQuery, params),
-      this.cagesRepo.query(cagesQuery),
       this.orderItemsRepo.query(topProductsQuery, params),
       this.batchesRepo.query(lowStockQuery, stockParams),
     ]);
@@ -157,17 +143,9 @@ export class DashboardService {
     for (const row of chartCostResult) if (chartMap.has(row.date)) chartMap.get(row.date)!.cost = Number(row.cost);
     const chartData = Array.from(chartMap.values()).map(item => ({ ...item, profit: item.revenue - item.cost })).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Pets
-    const petsData = petsResult.map((p: any) => ({ name: p.species || 'Unknown', value: Number(p.count) }));
-    const totalPets = petsData.reduce((sum: number, p: any) => sum + p.value, 0);
-
     // Appointments
     const apptsData = apptsResult.map((a: any) => ({ name: a.status, value: Number(a.count) }));
     const totalAppts = apptsData.reduce((sum: number, a: any) => sum + a.value, 0);
-
-    // Cages
-    const cagesData = cagesResult.map((c: any) => ({ name: c.status, value: Number(c.count) }));
-    const totalCages = cagesData.reduce((sum: number, c: any) => sum + c.value, 0);
 
     // Top Products
     const topProducts = topProductsResult.map((p: any) => ({ name: p.name, sold: Number(p.sold_quantity), revenue: Number(p.revenue) }));
@@ -178,9 +156,7 @@ export class DashboardService {
     return {
       totals: { revenue: totalRevenue, cost: totalCost, profit: totalProfit, orders: totalOrders, customers: allCustomers },
       chartData,
-      pets: { total: totalPets, data: petsData },
       appointments: { total: totalAppts, data: apptsData },
-      cages: { total: totalCages, data: cagesData },
       topProducts,
       lowStock
     };

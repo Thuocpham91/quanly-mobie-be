@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
@@ -45,6 +45,15 @@ export class CustomersService {
   }
 
   async create(customerData: Partial<Customer>): Promise<Customer> {
+    if (customerData.phone) {
+      const existing = await this.customersRepository.findOne({
+        where: { phone: customerData.phone },
+      });
+      if (existing) {
+        throw new BadRequestException('Số điện thoại khách hàng đã tồn tại trong hệ thống');
+      }
+    }
+
     const customer = this.customersRepository.create(customerData);
     const savedCustomer = await this.customersRepository.save(customer);
 
@@ -66,6 +75,14 @@ export class CustomersService {
 
   async update(id: string, customerData: Partial<Customer>): Promise<Customer> {
     await this.findOne(id);
+    if (customerData.phone) {
+      const existing = await this.customersRepository.findOne({
+        where: { phone: customerData.phone },
+      });
+      if (existing && existing.id !== id) {
+        throw new BadRequestException('Số điện thoại khách hàng đã tồn tại trong hệ thống');
+      }
+    }
     await this.customersRepository.update(id, customerData);
     return this.findOne(id);
   }

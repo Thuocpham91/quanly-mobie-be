@@ -28,12 +28,6 @@ export class AppointmentsController {
   findByCustomer(@Param('customerId') customerId: string) {
     return this.appointmentsService.findByCustomer(customerId);
   }
-
-  @Get('pet/:petId')
-  findByPet(@Param('petId') petId: string) {
-    return this.appointmentsService.findByPet(petId);
-  }
-
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.appointmentsService.findOne(id);

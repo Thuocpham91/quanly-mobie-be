@@ -7,7 +7,7 @@ import { CreateOrderDto } from './dto/order.dto';
 import { InventoryService } from '../inventory/inventory.service';
 import { Customer } from '../customers/entities/customer.entity';
 import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
-import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OrdersService {
@@ -21,7 +21,7 @@ export class OrdersService {
     @InjectRepository(UserBranchRole)
     private readonly userBranchRoleRepository: Repository<UserBranchRole>,
     private readonly inventoryService: InventoryService,
-    private readonly notificationsGateway: NotificationsGateway,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, branchId: string, userId: string): Promise<Order> {
@@ -80,7 +80,6 @@ export class OrdersService {
       branchId,
       createdById: userId,
       customerId: createOrderDto.customerId,
-      petId: createOrderDto.petId,
       subTotal,
       discount,
       totalAmount,
@@ -149,11 +148,11 @@ export class OrdersService {
         const orderMessage = `${creatorName} vừa tạo đơn hàng mới ${savedOrder.orderCode} trị giá ${savedOrder.totalAmount.toLocaleString('vi-VN')}đ`;
 
         for (const recipientId of recipientIds) {
-          this.notificationsGateway.sendNotificationToUser(recipientId, {
+          this.notificationsService.sendNotificationToUser(recipientId, {
+            title: 'Đơn hàng mới',
+            content: orderMessage,
             type: 'success',
-            message: orderMessage,
-            timestamp: new Date().toISOString(),
-            data: {
+            metadata: {
               orderId: savedOrder.id,
               orderCode: savedOrder.orderCode,
             },
@@ -167,13 +166,10 @@ export class OrdersService {
     return savedOrder;
   }
 
-  async findAll(branchId: string, page = 1, limit = 10, petId?: string, customerId?: string, createdById?: string): Promise<{ data: Order[]; total: number }> {
+  async findAll(branchId: string, page = 1, limit = 10, customerId?: string, createdById?: string): Promise<{ data: Order[]; total: number }> {
     const where: any = {};
     if (branchId && branchId !== 'undefined' && branchId !== 'null') {
       where.branchId = branchId;
-    }
-    if (petId) {
-      where.petId = petId;
     }
     if (customerId) {
       where.customerId = customerId;
@@ -185,7 +181,7 @@ export class OrdersService {
 
     const [data, total] = await this.ordersRepository.findAndCount({
       where,
-      relations: ['customer', 'createdBy', 'pet'],
+      relations: ['customer', 'createdBy'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -202,7 +198,7 @@ export class OrdersService {
 
     const order = await this.ordersRepository.findOne({
       where: whereClause,
-      relations: ['customer', 'createdBy', 'pet', 'items', 'items.product'],
+      relations: ['customer', 'createdBy', 'items', 'items.product'],
     });
 
     if (!order) {

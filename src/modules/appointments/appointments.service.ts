@@ -4,14 +4,14 @@ import { Repository } from 'typeorm';
 import { Appointment } from './entities/appointment.entity';
 import { CreateAppointmentDto, UpdateAppointmentDto } from './dto/appointment.dto';
 import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
-import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AppointmentsService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentsRepository: Repository<Appointment>,
-    private readonly notificationsGateway: NotificationsGateway,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(createAppointmentDto: CreateAppointmentDto): Promise<Appointment> {
@@ -19,11 +19,11 @@ export class AppointmentsService {
     const saved = await this.appointmentsRepository.save(appointment);
     if (saved.userId) {
       try {
-        this.notificationsGateway.sendNotificationToUser(saved.userId, {
+        await this.notificationsService.sendNotificationToUser(saved.userId, {
+          title: 'Công việc mới',
+          content: `Bạn được giao công việc mới: ${saved.purpose}`,
           type: 'info',
-          message: `Bạn được giao công việc mới: ${saved.purpose}`,
-          timestamp: new Date().toISOString(),
-          data: {
+          metadata: {
             appointmentId: saved.id,
           },
         });
@@ -43,7 +43,7 @@ export class AppointmentsService {
 
     const [data, total] = await this.appointmentsRepository.findAndCount({
       where: whereClause,
-      relations: ['pet', 'customer', 'user'],
+      relations: ['customer', 'user'],
       order: { dateTime: 'ASC' },
       skip,
       take: limit,
@@ -63,7 +63,7 @@ export class AppointmentsService {
   async findOne(id: string): Promise<Appointment> {
     const appointment = await this.appointmentsRepository.findOne({
       where: { id },
-      relations: ['pet', 'customer', 'user'],
+      relations: ['customer', 'user'],
     });
     if (!appointment) {
       throw new NotFoundException(`Appointment with ID ${id} not found`);
@@ -85,15 +85,6 @@ export class AppointmentsService {
   async findByCustomer(customerId: string): Promise<Appointment[]> {
     return this.appointmentsRepository.find({
       where: { customerId },
-      relations: ['pet'],
-      order: { dateTime: 'ASC' },
-    });
-  }
-
-  async findByPet(petId: string): Promise<Appointment[]> {
-    return this.appointmentsRepository.find({
-      where: { petId },
-      relations: ['customer'],
       order: { dateTime: 'ASC' },
     });
   }

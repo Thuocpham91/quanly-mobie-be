@@ -32,7 +32,6 @@ export class OrdersController {
     @Request() req,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
-    @Query('petId') petId?: string,
     @Query('customerId') customerId?: string,
   ) {
     const branchId = req.headers['x-branch-id'];
@@ -48,7 +47,7 @@ export class OrdersController {
     const isAdmin = req.user.email?.toLowerCase() === 'admin@gmail.com' || ubr?.role?.name === 'Admin';
     const viewAll = isAdmin || userPerms.includes('history.view_others');
 
-    return this.ordersService.findAll(branchId, page, limit, petId, customerId, viewAll ? undefined : userId);
+    return this.ordersService.findAll(branchId, page, limit, customerId, viewAll ? undefined : userId);
   }
 
   @Get(':id')

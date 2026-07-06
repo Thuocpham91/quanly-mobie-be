@@ -7,9 +7,7 @@ import { OrderItem } from '../orders/entities/order-item.entity';
 import { InventoryLog } from '../inventory/entities/inventory-log.entity';
 import { InventoryBatch } from '../inventory/entities/inventory-batch.entity';
 import { Customer } from '../customers/entities/customer.entity';
-import { Pet } from '../pets/entities/pet.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
-import { Cage } from '../cages/entities/cage.entity';
 import { Product } from '../products/entities/product.entity';
 import { AuthModule } from '../auth/auth.module';
 
@@ -17,7 +15,7 @@ import { AuthModule } from '../auth/auth.module';
   imports: [
     TypeOrmModule.forFeature([
       Order, OrderItem, InventoryLog, InventoryBatch, Customer, 
-      Pet, Appointment, Cage, Product
+      Appointment, Product
     ]),
     forwardRef(() => AuthModule),
   ],

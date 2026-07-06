@@ -1,5 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne } from 'typeorm';
-import { Pet } from '../../pets/entities/pet.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 
 @Entity('customers')
 export class Customer {
@@ -29,9 +28,6 @@ export class Customer {
 
   @UpdateDateColumn()
   updatedAt: Date;
-
-  @OneToMany(() => Pet, (pet) => pet.owner)
-  pets: Pet[];
 
   @Column({ default: 'Khách lẻ' })
   customerType: string;

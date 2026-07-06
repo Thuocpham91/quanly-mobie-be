@@ -4,10 +4,6 @@ import { AppointmentStatus } from '../entities/appointment.entity';
 export class CreateAppointmentDto {
   @IsString()
   @IsOptional()
-  petId?: string;
-
-  @IsString()
-  @IsOptional()
   customerId?: string;
 
   @IsString()

@@ -8,9 +8,6 @@ import { UsersModule } from './modules/users/users.module';
 import { BranchesModule } from './modules/branches/branches.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { CustomersModule } from './modules/customers/customers.module';
-import { PetsModule } from './modules/pets/pets.module';
-import { RoomsModule } from './modules/rooms/rooms.module';
-import { CagesModule } from './modules/cages/cages.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -47,9 +44,6 @@ import { ServiceOrdersModule } from './modules/service-orders/service-orders.mod
     BranchesModule,
     LocationsModule,
     CustomersModule,
-    PetsModule,
-    RoomsModule,
-    CagesModule,
     ProductsModule,
     InventoryModule,
     CategoriesModule,

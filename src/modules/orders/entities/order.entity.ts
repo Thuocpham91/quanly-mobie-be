@@ -3,7 +3,6 @@ import { OrderItem } from './order-item.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { Branch } from '../../branches/entities/branch.entity';
 import { User } from '../../users/entities/user.entity';
-import { Pet } from '../../pets/entities/pet.entity';
 
 export enum OrderStatus {
   DRAFT = 'DRAFT',
@@ -32,13 +31,6 @@ export class Order {
   @ManyToOne(() => Customer, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'customerId' })
   customer: Customer;
-
-  @Column({ nullable: true })
-  petId: string;
-
-  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'petId' })
-  pet: Pet;
 
   @Column()
   branchId: string;

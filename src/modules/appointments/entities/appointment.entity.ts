@@ -1,5 +1,4 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
-import { Pet } from '../../pets/entities/pet.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { User } from '../../users/entities/user.entity';
 
@@ -14,12 +13,6 @@ export enum AppointmentStatus {
 export class Appointment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  @Column({ nullable: true })
-  petId: string;
-
-  @ManyToOne(() => Pet, { onDelete: 'CASCADE', nullable: true })
-  pet: Pet;
 
   @Column({ nullable: true })
   customerId: string;
