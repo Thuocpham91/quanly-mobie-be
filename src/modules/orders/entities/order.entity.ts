@@ -1,4 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToMany,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { OrderItem } from './order-item.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { Branch } from '../../branches/entities/branch.entity';
@@ -46,14 +55,17 @@ export class Order {
   @JoinColumn({ name: 'createdById' })
   createdBy: User;
 
-  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
   subTotal: number;
 
-  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
   discount: number;
 
-  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
   totalAmount: number;
+
+  @Column('int', { default: 0 })
+  totalQuantity: number;
 
   @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.COMPLETED })
   status: OrderStatus;
@@ -64,10 +76,10 @@ export class Order {
   @Column({ nullable: true })
   notes: string;
 
-  @Column('decimal', { precision: 12, scale: 2, default: 0, nullable: true })
+  @Column('decimal', { precision: 15, scale: 2, default: 0, nullable: true })
   walletCreditAmount: number;
 
-  @OneToMany(() => OrderItem, item => item.order, { cascade: true })
+  @OneToMany(() => OrderItem, (item) => item.order)
   items: OrderItem[];
 
   @CreateDateColumn()

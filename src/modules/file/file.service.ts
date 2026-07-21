@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { v4 as uuidv4 } from "uuid";
+import { join } from "path";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 
 import { UploadFileResponseDto } from "./upload-file.response.dto";
 import { UploadFileResponse, UploadFileListResponse } from "./upload-file.response";
@@ -16,10 +18,19 @@ export class FileService {
     MAX_FILE_NAME_LENGTH: 255,
     MAX_FILES_COUNT: 50,
 
-    ALLOWED_EXTENSIONS: ["jpg", "jpeg", "png", "gif", "pdf", "csv"],
+    ALLOWED_EXTENSIONS: ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "jfif", "heic", "heif", "avif", "tiff", "ico", "pdf", "csv"],
     BLACKLIST_EXTENSIONS: ["exe", "js", "sh", "bat", "cmd"],
 
-    ALLOWED_MIME_TYPES: ["image/jpeg", "image/png", "image/gif", "application/pdf", "text/csv"],
+    ALLOWED_MIME_TYPES: [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "image/svg+xml",
+      "image/bmp",
+      "application/pdf",
+      "text/csv",
+    ],
     BLACKLIST_MIME_TYPES: ["application/x-msdownload", "application/javascript", "application/x-sh"],
   };
 
@@ -37,7 +48,11 @@ export class FileService {
 
   async uploadMultipleFiles(files: MulterFile[]): Promise<UploadFileListResponse> {
     if (!files || !files.length) {
-      throw new BadRequestException("No files uploaded");
+      if ((files as any)?.buffer || (files as any)?.originalname) {
+        files = [files as any];
+      } else {
+        throw new BadRequestException("Không có file nào được chọn để tải lên");
+      }
     }
 
     const uploadedFiles: UploadFileResponseDto[] = [];
@@ -108,21 +123,46 @@ export class FileService {
 
     const uniqueName = this.generateUniqueFileName(file.originalname);
 
-    const { etag } = await this.storageService.uploadBuffer(
-      uniqueName,
-      file.buffer,
-      file.mimetype,
-    );
+    try {
+      const { etag } = await this.storageService.uploadBuffer(
+        uniqueName,
+        file.buffer,
+        file.mimetype,
+      );
 
-    const url = await this.storageService.getPublicUrl(uniqueName);
+      const url = await this.storageService.getPublicUrl(uniqueName);
 
-    return {
-      key: uniqueName,
-      etag: etag || "",
-      contentType: file.mimetype,
-      size: file.size,
-      url,
-    };
+      return {
+        key: uniqueName,
+        etag: etag || "",
+        contentType: file.mimetype,
+        size: file.size,
+        url,
+      };
+    } catch (azureErr) {
+      // Azure storage fallback: write file to local uploads directory
+      try {
+        const uploadDir = join(process.cwd(), "uploads", "products");
+        if (!existsSync(uploadDir)) {
+          mkdirSync(uploadDir, { recursive: true });
+        }
+        const filePath = join(uploadDir, uniqueName);
+        writeFileSync(filePath, file.buffer);
+        const url = `/uploads/products/${uniqueName}`;
+
+        return {
+          key: uniqueName,
+          etag: "",
+          contentType: file.mimetype,
+          size: file.size,
+          url,
+        };
+      } catch (localErr: any) {
+        throw new BadRequestException(
+          `Upload failed: ${azureErr?.message || localErr?.message}`,
+        );
+      }
+    }
   }
 
   private generateUniqueFileName(fileName: string): string {
@@ -141,20 +181,37 @@ export class FileService {
   }
 
   private validateFileNameAndType(fileName: string, contentType: string) {
-    const { MAX_FILE_NAME_LENGTH, ALLOWED_EXTENSIONS, BLACKLIST_EXTENSIONS, ALLOWED_MIME_TYPES, BLACKLIST_MIME_TYPES } =
-      this.CONFIG;
+    const {
+      MAX_FILE_NAME_LENGTH,
+      ALLOWED_EXTENSIONS,
+      BLACKLIST_EXTENSIONS,
+      ALLOWED_MIME_TYPES,
+      BLACKLIST_MIME_TYPES,
+    } = this.CONFIG;
 
     if (!fileName || fileName.length > MAX_FILE_NAME_LENGTH) {
       throw new BadRequestException("Invalid file name");
     }
 
     const ext = fileName.split(".").pop()?.toLowerCase();
-    if (!ext || !ALLOWED_EXTENSIONS.includes(ext) || BLACKLIST_EXTENSIONS.includes(ext)) {
-      throw new BadRequestException("Invalid extension");
+    if (
+      !ext ||
+      !ALLOWED_EXTENSIONS.includes(ext) ||
+      BLACKLIST_EXTENSIONS.includes(ext)
+    ) {
+      throw new BadRequestException(`Định dạng file .${ext} không được hỗ trợ`);
     }
 
-    if (!ALLOWED_MIME_TYPES.includes(contentType) || BLACKLIST_MIME_TYPES.includes(contentType)) {
-      throw new BadRequestException("Invalid mime type");
+    const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "jfif", "heic", "heif", "avif", "tiff", "ico"].includes(
+      ext,
+    );
+    if (!isImage) {
+      if (
+        !ALLOWED_MIME_TYPES.includes(contentType) ||
+        BLACKLIST_MIME_TYPES.includes(contentType)
+      ) {
+        throw new BadRequestException(`Mime type ${contentType} không được hỗ trợ`);
+      }
     }
   }
 }

@@ -1,4 +1,8 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { existsSync, mkdirSync } from 'fs';
+import * as path from 'path';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto } from './dto/inventory.dto';
 import { CreateStocktakeDto, UpdateStocktakeDto, ApproveStocktakeDto } from './dto/stocktake.dto';
@@ -31,8 +35,14 @@ export class InventoryController {
   }
 
   @Get('batches')
-  findAllBatches(@Query('branchId') branchId?: string) {
-    return this.inventoryService.findAllBatches(branchId);
+  findAllBatches(
+    @Query('branchId') branchId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page as string, 10) || 1;
+    const limitNum = parseInt(limit as string, 10) || 10;
+    return this.inventoryService.findAllBatches(branchId, pageNum, limitNum);
   }
 
   @Get('batches/:id')
@@ -125,5 +135,36 @@ export class InventoryController {
   @Post('transfer')
   transferStock(@Body() transferDto: CreateTransferDto, @Request() req) {
     return this.inventoryService.transferStock(transferDto, req.user.id);
+  }
+
+  @Post('import-legacy')
+  @UseInterceptors(FileInterceptor('file'))
+  importLegacy(@UploadedFile() file: any, @Query('branchId') branchId: string, @Request() req) {
+    return this.inventoryService.importLegacyFromExcel(file?.buffer, branchId, req.user.id);
+  }
+
+  @Post('upload-legacy')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: (req, file, cb) => {
+        const uploadPath = path.resolve('uploads', 'legacy');
+        if (!existsSync(uploadPath)) mkdirSync(uploadPath, { recursive: true });
+        cb(null, uploadPath);
+      },
+      filename: (req, file, cb) => {
+        const unique = Date.now() + '-' + Math.floor(Math.random() * 1e9);
+        const ext = path.extname(file.originalname);
+        cb(null, `${unique}${ext}`);
+      },
+    }),
+  }))
+  uploadLegacy(@UploadedFile() file: any) {
+    return { filename: file.filename, path: file.path };
+  }
+
+  @Post('process-upload')
+  processUpload(@Body('filename') filename: string, @Body('branchId') branchId: string, @Request() req) {
+    const filePath = path.resolve('uploads', 'legacy', filename);
+    return this.inventoryService.importLegacyFromFile(filePath, branchId, req.user.id);
   }
 }

@@ -19,6 +19,9 @@ export class Distributor {
   email: string;
 
   @Column({ nullable: true })
+  code: string;
+
+  @Column({ nullable: true })
   description: string;
 
   @OneToMany(() => InventoryBatch, batch => batch.distributor)

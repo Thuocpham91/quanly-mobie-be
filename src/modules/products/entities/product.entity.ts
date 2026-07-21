@@ -23,6 +23,9 @@ export class Product {
   @Column({ nullable: true })
   imageUrl: string;
 
+  @Column('simple-array', { nullable: true })
+  imageUrls: string[];
+
   @Column({ nullable: true })
   manufacturer: string;
 

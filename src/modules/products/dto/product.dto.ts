@@ -36,6 +36,11 @@ export class CreateProductDto {
   @IsOptional()
   imageUrl?: string;
 
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  imageUrls?: string[];
+
   @IsString()
   @IsOptional()
   manufacturer?: string;

@@ -14,9 +14,23 @@ export class OrderItemDto {
   @IsNumber()
   @Type(() => Number)
   unitPrice: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  discountPercent?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  discountAmount?: number;
 }
 
 export class CreateOrderDto {
+  @IsString()
+  @IsOptional()
+  orderCode?: string;
+
   @IsString()
   @IsOptional()
   customerId?: string;
@@ -45,5 +59,16 @@ export class CreateOrderDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
-  items: OrderItemDto[];
+  @IsOptional()
+  items?: OrderItemDto[];
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  invoiceTotal?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  totalQuantity?: number;
 }

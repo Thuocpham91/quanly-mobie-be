@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Headers, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CustomersService } from './customers.service';
-import { CreateCustomerDto, UpdateCustomerDto } from './dto/customer.dto';
+import { CreateCustomerDto, UpdateCustomerDto, BulkCreateCustomersDto } from './dto/customer.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { IsNumber } from 'class-validator';
 
@@ -20,6 +21,29 @@ export class CustomersController {
       createCustomerDto.branchId = headerBranchId;
     }
     return this.customersService.create(createCustomerDto);
+  }
+
+  @Post('bulk')
+  bulkCreate(@Body() body: BulkCreateCustomersDto, @Headers('x-branch-id') headerBranchId?: string) {
+    const list = body.customers.map(c => {
+      if (!c.branchId && headerBranchId) {
+        c.branchId = headerBranchId;
+      }
+      return c;
+    });
+    return this.customersService.bulkCreate(list);
+  }
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importCustomers(
+    @UploadedFile() file: any,
+    @Headers('x-branch-id') headerBranchId?: string
+  ) {
+    if (!file) {
+      throw new BadRequestException('Vui lòng tải lên tệp tin Excel');
+    }
+    return this.customersService.importExcel(file.buffer, headerBranchId);
   }
 
   @Get()

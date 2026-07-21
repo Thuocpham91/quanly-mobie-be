@@ -82,6 +82,7 @@ export class DashboardService {
     // --- 7. TOP PRODUCTS ---
     const topProductsQuery = `
       SELECT 
+        p.id,
         p.name,
         SUM(oi.quantity) as sold_quantity,
         SUM(oi."totalPrice") as revenue
@@ -91,7 +92,7 @@ export class DashboardService {
       WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
       GROUP BY p.id, p.name
       ORDER BY sold_quantity DESC
-      LIMIT 5
+      LIMIT 20
     `;
 
     // --- 8. LOW STOCK ALERT ---
@@ -148,7 +149,7 @@ export class DashboardService {
     const totalAppts = apptsData.reduce((sum: number, a: any) => sum + a.value, 0);
 
     // Top Products
-    const topProducts = topProductsResult.map((p: any) => ({ name: p.name, sold: Number(p.sold_quantity), revenue: Number(p.revenue) }));
+    const topProducts = topProductsResult.map((p: any) => ({ id: p.id, name: p.name, sold: Number(p.sold_quantity), revenue: Number(p.revenue) }));
 
     // Low Stock
     const lowStock = lowStockResult.map((l: any) => ({ name: l.name, remaining: Number(l.remaining_quantity) }));

@@ -18,6 +18,10 @@ export class CreateDistributorDto {
 
   @IsString()
   @IsOptional()
+  code?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
 }
 
@@ -37,6 +41,10 @@ export class UpdateDistributorDto {
   @IsEmail()
   @IsOptional()
   email?: string;
+
+  @IsString()
+  @IsOptional()
+  code?: string;
 
   @IsString()
   @IsOptional()

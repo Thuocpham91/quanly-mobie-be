@@ -1,9 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import * as xlsx from 'xlsx';
+import * as fs from 'fs';
+import * as path from 'path';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import { InventoryBatch } from './entities/inventory-batch.entity';
 import { InventoryLog, StockMovementType } from './entities/inventory-log.entity';
+import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 import { Product } from '../products/entities/product.entity';
+import { Distributor } from '../distributors/entities/distributor.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto } from './dto/inventory.dto';
 import { CreateStocktakeDto, UpdateStocktakeDto } from './dto/stocktake.dto';
@@ -11,6 +16,7 @@ import { Stocktake, StocktakeStatus } from './entities/stocktake.entity';
 import { StocktakeItem } from './entities/stocktake-item.entity';
 import { InventoryTransfer, TransferStatus } from './entities/inventory-transfer.entity';
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
+import { parseLegacyImportRow } from './legacy-import.util';
 
 export interface InventorySummary {
   product: Product;
@@ -28,6 +34,8 @@ export class InventoryService {
     private inventoryLogRepository: Repository<InventoryLog>,
     @InjectRepository(Product)
     private productsRepository: Repository<Product>,
+    @InjectRepository(Distributor)
+    private distributorRepository: Repository<Distributor>,
     @InjectRepository(OrderItem)
     private orderItemRepository: Repository<OrderItem>,
     @InjectRepository(Stocktake)
@@ -43,16 +51,30 @@ export class InventoryService {
   // ==========================================
   // INVENTORY BATCH & SUMMARY
   // ==========================================
-  async findAllBatches(branchId?: string): Promise<InventoryBatch[]> {
+  async findAllBatches(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<InventoryBatch>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
     const whereClause = branchId ? { branchId } : {};
-    return this.inventoryRepository.find({
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await this.inventoryRepository.findAndCount({
       where: whereClause,
       relations: ['product', 'product.category', 'product.itemGroup', 'distributor'],
-      order: { createdAt: 'DESC' }
+      order: { createdAt: 'DESC' },
+      skip,
+      take: limit,
     });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
   }
 
   async findOneBatch(id: string): Promise<InventoryBatch> {
@@ -648,5 +670,170 @@ export class InventoryService {
       throw new NotFoundException(`Không tìm thấy phiếu chuyển kho với ID ${id}`);
     }
     return transfer;
+  }
+
+  // Import legacy inventory data from an Excel file buffer.
+  async importLegacyFromExcel(buffer: Buffer, branchId: string, userId: string): Promise<{ imported: number; errors: any[]; errorFile?: string }> {
+    if (!buffer) {
+      throw new Error('File buffer is required');
+    }
+    if (!branchId) {
+      throw new Error('branchId query parameter is required');
+    }
+
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+
+    const results = { imported: 0, errors: [] as any[] };
+
+    for (const [index, row] of rows.entries()) {
+      try {
+        const parsed = parseLegacyImportRow(row);
+
+        if (parsed.errors.length > 0) {
+          results.errors.push({ row: index + 2, reason: parsed.errors.map((error) => `${error.field}: ${error.reason}`).join(' | ') });
+          continue;
+        }
+
+        const productIdentifier = parsed.productIdentifier;
+        const quantity = parsed.quantity;
+        const costPrice = parsed.costPrice;
+        const importDate = parsed.importDate;
+        const invoiceName = parsed.invoiceName;
+        const personnelName = parsed.personnelName;
+        const distributorIdentifier = parsed.distributorIdentifier;
+        const distributorCode = parsed.distributorCode;
+        const distributorName = parsed.distributorName;
+        const distributorPhone = parsed.distributorPhone;
+        const distributorAddress = parsed.distributorAddress;
+        const productName = parsed.productName;
+
+        if (!productIdentifier || quantity === null || quantity <= 0) {
+          results.errors.push({ row: index + 2, reason: 'Dữ liệu dòng không hợp lệ' });
+          continue;
+        }
+
+        // Ensure distributor exists (create if missing). Try matching by code (in description), name or phone.
+        let distributor: Distributor | null = null;
+        if (distributorCode || distributorName || distributorIdentifier || distributorPhone) {
+          const whereClauses: any[] = [];
+          if (distributorCode) whereClauses.push({ code: distributorCode });
+          if (distributorName) whereClauses.push({ name: distributorName });
+          if (distributorIdentifier) whereClauses.push({ name: distributorIdentifier });
+          if (distributorPhone) whereClauses.push({ phone: distributorPhone });
+
+          distributor = (await this.distributorRepository.findOne({ where: whereClauses })) as unknown as Distributor | null;
+          if (!distributor) {
+            const createDto: Partial<Distributor> = {
+              name: distributorName || distributorIdentifier || distributorCode || 'Nhà cung cấp mới',
+              phone: distributorPhone || undefined,
+              address: distributorAddress || undefined,
+              code: distributorCode || undefined,
+              description: distributorIdentifier || undefined,
+            };
+            const newDist = this.distributorRepository.create(createDto as any);
+            distributor = (await this.distributorRepository.save(newDist)) as unknown as Distributor;
+          }
+        }
+
+        const product = await this.productsRepository.findOne({
+          where: [
+            { productCode: productIdentifier },
+            { barcode: productIdentifier },
+            { name: productIdentifier },
+          ],
+        });
+
+        // If product not found, create a minimal product record
+        let finalProduct: Product | null = product ?? null;
+        if (!finalProduct) {
+          try {
+            const createData: Partial<Product> = {
+              name: productName || String(productIdentifier),
+              productCode: productIdentifier,
+              barcode: productIdentifier,
+            };
+            const newProduct = this.productsRepository.create(createData as any);
+            finalProduct = await this.productsRepository.save(newProduct as any);
+          } catch (createErr) {
+            results.errors.push({ row: index + 2, product: productIdentifier, reason: 'Không tìm thấy sản phẩm và không thể tạo mới' });
+            continue;
+          }
+        }
+
+        const batch = this.inventoryRepository.create({
+          productId: finalProduct!.id,
+          branchId,
+          importedQuantity: quantity,
+          currentQuantity: quantity,
+          costPrice,
+          importDate,
+          invoiceName,
+          personnelName,
+          distributorId: distributor ? distributor.id : undefined,
+        });
+
+        const saved = await this.inventoryRepository.save(batch);
+
+        const log = this.inventoryLogRepository.create({
+          productId: finalProduct!.id,
+          branchId,
+          type: StockMovementType.IMPORT,
+          quantity: quantity,
+          batchId: saved.id,
+          referenceCode: 'LEGACY-' + Date.now(),
+          note: `Import legacy row ${index + 2}`,
+          createdById: userId,
+        });
+        await this.inventoryLogRepository.save(log);
+
+        results.imported += 1;
+      } catch (err) {
+        results.errors.push({ row: index + 2, reason: err.message || err });
+      }
+    }
+
+    // If there are errors, write them to an Excel file under uploads/legacy for later download
+    if (results.errors.length > 0) {
+      try {
+        const errRows = results.errors.map((e) => ({
+          row: e.row ?? e.rowNum ?? '',
+          product: e.product ?? e.productIdentifier ?? '',
+          reason: e.reason || e.message || JSON.stringify(e),
+        }));
+
+        const ws = xlsx.utils.json_to_sheet(errRows);
+        const wb = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(wb, ws, 'Errors');
+
+        const uploadPath = path.resolve('uploads', 'legacy');
+        if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+        const filename = `import_errors_${Date.now()}.xlsx`;
+        const filePath = path.join(uploadPath, filename);
+
+        // writeFile will create the file on disk
+        xlsx.writeFile(wb, filePath);
+
+        results['errorFile'] = filePath;
+      } catch (writeErr) {
+        // ignore file write errors but include an info entry
+        results.errors.push({ row: null, reason: `Failed to write error file: ${writeErr.message || writeErr}` });
+      }
+    }
+
+    return results;
+  }
+
+  // Read a saved file from disk and import its contents.
+  async importLegacyFromFile(filePath: string, branchId: string, userId: string): Promise<{ imported: number; errors: any[] }> {
+    if (!filePath) throw new Error('filePath is required');
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      throw new NotFoundException(`File not found: ${resolved}`);
+    }
+    const buffer = await fs.promises.readFile(resolved);
+    return this.importLegacyFromExcel(buffer, branchId, userId);
   }
 }

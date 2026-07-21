@@ -1,4 +1,17 @@
-import { Controller, Get, Post, Body, Param, Query, Put, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Put,
+  UseGuards,
+  Request,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -33,6 +46,8 @@ export class OrdersController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
     @Query('customerId') customerId?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
     const branchId = req.headers['x-branch-id'];
     const userId = req.user.userId || req.user.id || req.user.sub;
@@ -44,10 +59,20 @@ export class OrdersController {
       order: { createdAt: 'ASC' },
     });
     const userPerms = ubr?.role?.permissions?.map((p: any) => p.name) || [];
-    const isAdmin = req.user.email?.toLowerCase() === 'admin@gmail.com' || ubr?.role?.name === 'Admin';
+    const isAdmin =
+      req.user.email?.toLowerCase() === 'admin@gmail.com' ||
+      ubr?.role?.name === 'Admin';
     const viewAll = isAdmin || userPerms.includes('history.view_others');
 
-    return this.ordersService.findAll(branchId, page, limit, customerId, viewAll ? undefined : userId);
+    return this.ordersService.findAll(
+      branchId,
+      page,
+      limit,
+      customerId,
+      viewAll ? undefined : userId,
+      status,
+      search,
+    );
   }
 
   @Get(':id')
@@ -65,5 +90,34 @@ export class OrdersController {
     const branchId = req.headers['x-branch-id'];
     const userId = req.user.userId;
     return this.ordersService.updateStatus(id, branchId, status, userId);
+  }
+
+  @Post('import')
+  @Permissions('sales.create')
+  @UseInterceptors(FileInterceptor('file'))
+  importOrders(@UploadedFile() file: any, @Request() req) {
+    const branchId = req.headers['x-branch-id'];
+    return this.ordersService.importOrdersFromExcel(
+      file?.buffer,
+      branchId,
+      req.user.userId,
+    );
+  }
+
+  @Post('import-details')
+  @Permissions('sales.create')
+  @UseInterceptors(FileInterceptor('file'))
+  importOrderDetails(@UploadedFile() file: any, @Request() req) {
+    const branchId = req.headers['x-branch-id'];
+    // optional query params for createMissingOrders and skipStockDeduction
+    return this.ordersService.importOrderDetailsFromExcel(
+      file?.buffer,
+      branchId,
+      req.user.userId,
+      {
+        createMissingOrders: req.query.createMissingOrders !== 'false',
+        skipStockDeduction: req.query.skipStockDeduction !== 'false',
+      },
+    );
   }
 }

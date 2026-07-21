@@ -11,6 +11,7 @@ import { InventoryTransferItem } from './entities/inventory-transfer-item.entity
 import { Product } from '../products/entities/product.entity';
 import { ProductUnit } from '../products/entities/product-unit.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
+import { Distributor } from '../distributors/entities/distributor.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([
@@ -22,7 +23,8 @@ import { OrderItem } from '../orders/entities/order-item.entity';
     InventoryTransferItem,
     Product,
     ProductUnit,
-    OrderItem
+    OrderItem,
+    Distributor,
   ])],
   controllers: [InventoryController],
   providers: [InventoryService],

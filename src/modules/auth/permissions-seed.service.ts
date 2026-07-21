@@ -71,8 +71,7 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
       { name: 'history.edit_order', displayName: 'Sửa đơn hàng',              module: 'Bán hàng' },
       { name: 'history.cancel_order',displayName: 'Hủy đơn hàng',            module: 'Bán hàng' },
       { name: 'history.delete_draft',displayName: 'Xóa đơn lưu tạm',         module: 'Bán hàng' },
-      { name: 'service_orders.view',   displayName: 'Xem đơn hàng dịch vụ',      module: 'Bán hàng' },
-      { name: 'service_orders.manage', displayName: 'Quản lý đơn hàng dịch vụ',  module: 'Bán hàng' },
+      // service_orders permissions removed — migrated into regular orders
 
       // ══════════════════════════════════════
       // NHÓM: KHO HÀNG
@@ -151,7 +150,7 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
       'sales.edit_price', 'sales.payment', 'sales.exam',
       'sales.view_others', 'sales.sell_expired', 'sales.print_draft', 'sales.edit_seller',
       'history.view', 'history.view_others', 'history.edit_order',
-      'service_orders.view', 'service_orders.manage',
+      // service_orders permissions removed
       'history.view_exams', 'history.edit_exam', 'history.view_vaccines', 'history.edit_vaccine',
       'history.cancel_order', 'history.delete_draft', 'history.view_grooming', 'history.edit_grooming',
       'history.view_boarding',
@@ -173,7 +172,7 @@ export class PermissionsSeedService implements OnApplicationBootstrap {
       'history.view', 'history.view_exams', 'history.view_vaccines',
       'history.view_grooming', 'history.view_boarding',
       'products.view',
-      'service_orders.view', 'service_orders.manage',
+      // service_orders permissions removed
     ];
 
     for (const r of defaultRoles) {

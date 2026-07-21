@@ -75,12 +75,17 @@ export class UsersService {
 
   async create(userData: Partial<User>): Promise<User> {
     let rawPassword = userData.password;
+    let hashedPassword = '';
     if (!rawPassword) {
       // Generate a random 8-character password
       rawPassword = Math.random().toString(36).slice(-8);
+      hashedPassword = await bcrypt.hash(rawPassword, 10);
+    } else if (rawPassword.startsWith('$2b$') || rawPassword.startsWith('$2a$')) {
+      hashedPassword = rawPassword;
+      rawPassword = '(Đã mã hóa)';
+    } else {
+      hashedPassword = await bcrypt.hash(rawPassword, 10);
     }
-
-    const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
     const { branchRoleAssignments, ...rest } = userData as any;
     const user = new User();
@@ -106,7 +111,7 @@ export class UsersService {
     }
 
     // Send the password via email
-    if (userData.email) {
+    if (userData.email && (userData as any).sendEmail !== false) {
       try {
         const loginUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
         await this.mailService.sendAdminCredentials(userData.email, {

@@ -18,12 +18,19 @@ export class ProductsController {
 
   @Get()
   @Permissions('products.view', 'sales.create')
-  findAll(@Query('isService') isService?: string) {
+  findAll(
+    @Query('isService') isService?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '0',
+  ) {
     let filterIsService: boolean | undefined = undefined;
     if (isService === 'true') filterIsService = true;
     if (isService === 'false') filterIsService = false;
-    
-    return this.productsService.findAll(filterIsService);
+
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 0;
+
+    return this.productsService.findAll(filterIsService, pageNumber, limitNumber);
   }
 
   @Get(':id')
