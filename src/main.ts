@@ -8,6 +8,47 @@ import { join } from 'path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  const corsOriginsEnv = process.env.CORS_ORIGINS;
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      if (!corsOriginsEnv || corsOriginsEnv.trim() === '*') {
+        return callback(null, true);
+      }
+
+      const allowedOrigins = corsOriginsEnv
+        .split(',')
+        .map((o) => o.trim().replace(/\/$/, ''))
+        .filter(Boolean);
+
+      const cleanOrigin = origin.replace(/\/$/, '');
+
+      if (allowedOrigins.includes(cleanOrigin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+
+      if (process.env.FRONTEND_URL && cleanOrigin === process.env.FRONTEND_URL.replace(/\/$/, '')) {
+        return callback(null, true);
+      }
+
+      return callback(null, true);
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-branch-id',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Access-Control-Allow-Headers',
+      'Access-Control-Request-Method',
+      'Access-Control-Request-Headers',
+    ],
+    credentials: true,
+  });
+
   app.setGlobalPrefix('api/v1', {
     exclude: [
       { path: '', method: RequestMethod.GET },
@@ -17,21 +58,6 @@ async function bootstrap() {
 
   app.useBodyParser('json', { limit: '50mb' });
   app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
-  const corsOriginsEnv = process.env.CORS_ORIGINS;
-  let corsOrigins: boolean | string | string[] = true;
-  if (corsOriginsEnv) {
-    if (corsOriginsEnv.trim() === '*') {
-      corsOrigins = '*';
-    } else {
-      corsOrigins = corsOriginsEnv.split(',').map((origin) => origin.trim());
-    }
-  }
-
-  app.enableCors({
-    origin: corsOrigins,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true,
-  });
 
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',
