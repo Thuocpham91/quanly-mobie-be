@@ -16,7 +16,7 @@ import { Stocktake, StocktakeStatus } from './entities/stocktake.entity';
 import { StocktakeItem } from './entities/stocktake-item.entity';
 import { InventoryTransfer, TransferStatus } from './entities/inventory-transfer.entity';
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
-import { InventoryImportOrder } from './entities/inventory-import-order.entity';
+import { InventoryImportOrder, ImportOrderStatus } from './entities/inventory-import-order.entity';
 import { parseLegacyImportRow } from './legacy-import.util';
 
 export interface InventorySummary {
@@ -706,6 +706,7 @@ export class InventoryService {
     const rows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
 
     const results = { imported: 0, errors: [] as any[] };
+    const importOrdersMap = new Map<string, InventoryImportOrder>();
 
     for (const [index, row] of rows.entries()) {
       try {
@@ -720,7 +721,7 @@ export class InventoryService {
         const quantity = parsed.quantity;
         const costPrice = parsed.costPrice;
         const importDate = parsed.importDate;
-        const invoiceName = parsed.invoiceName;
+        const invoiceName = (parsed.invoiceName || '').trim();
         const personnelName = parsed.personnelName;
         const distributorIdentifier = parsed.distributorIdentifier;
         const distributorCode = parsed.distributorCode;
@@ -773,6 +774,7 @@ export class InventoryService {
               name: productName || String(productIdentifier),
               productCode: productIdentifier,
               barcode: productIdentifier,
+              basePrice: costPrice > 0 ? costPrice : 0,
             };
             const newProduct = this.productsRepository.create(createData as any);
             finalProduct = await this.productsRepository.save(newProduct as any);
@@ -782,6 +784,57 @@ export class InventoryService {
           }
         }
 
+        // Update product basePrice if costPrice > 0
+        if (costPrice > 0 && finalProduct) {
+          await this.productsRepository.update(finalProduct.id, { basePrice: costPrice });
+        }
+
+        // Handle Import Order (Phiếu nhập kho) creation / linking by invoiceName
+        let importOrder: InventoryImportOrder | null = null;
+        if (invoiceName) {
+          const mapKey = `${branchId}_${invoiceName.toLowerCase()}`;
+          importOrder = importOrdersMap.get(mapKey) || null;
+
+          if (!importOrder) {
+            importOrder = await this.importOrderRepository.findOne({
+              where: [
+                { invoiceName, branchId },
+                { code: invoiceName, branchId },
+              ],
+            });
+
+            if (!importOrder) {
+              let code = invoiceName;
+              const existingCode = await this.importOrderRepository.findOne({ where: { code } });
+              if (existingCode) {
+                code = `NK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+              }
+
+              const newOrder = this.importOrderRepository.create({
+                code,
+                invoiceName,
+                branchId,
+                distributorId: distributor ? distributor.id : undefined,
+                personnelName: personnelName || undefined,
+                importDate: importDate || new Date(),
+                createdById: userId,
+                totalAmount: 0,
+                status: ImportOrderStatus.COMPLETED,
+              });
+              importOrder = await this.importOrderRepository.save(newOrder);
+            }
+            importOrdersMap.set(mapKey, importOrder);
+          } else if (!importOrder.distributorId && distributor) {
+            importOrder.distributorId = distributor.id;
+            await this.importOrderRepository.update(importOrder.id, { distributorId: distributor.id });
+          }
+
+          // Accumulate line total amount into importOrder
+          const lineTotal = costPrice * quantity;
+          importOrder.totalAmount = Number(importOrder.totalAmount || 0) + lineTotal;
+          await this.importOrderRepository.update(importOrder.id, { totalAmount: importOrder.totalAmount });
+        }
+
         const batch = this.inventoryRepository.create({
           productId: finalProduct!.id,
           branchId,
@@ -789,9 +842,10 @@ export class InventoryService {
           currentQuantity: quantity,
           costPrice,
           importDate,
-          invoiceName,
+          invoiceName: invoiceName || undefined,
           personnelName,
           distributorId: distributor ? distributor.id : undefined,
+          importOrderId: importOrder ? importOrder.id : undefined,
         });
 
         const saved = await this.inventoryRepository.save(batch);
@@ -802,7 +856,7 @@ export class InventoryService {
           type: StockMovementType.IMPORT,
           quantity: quantity,
           batchId: saved.id,
-          referenceCode: 'LEGACY-' + Date.now(),
+          referenceCode: importOrder ? importOrder.code : ('LEGACY-' + Date.now()),
           note: `Import legacy row ${index + 2}`,
           createdById: userId,
         });
