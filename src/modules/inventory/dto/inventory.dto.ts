@@ -136,3 +136,113 @@ export class CreateTransferDto {
   @Type(() => TransferItemDto)
   items: TransferItemDto[];
 }
+
+// ==========================================
+// IMPORT ORDER DTOs
+// ==========================================
+
+export class ImportOrderItemDto {
+  @IsString()
+  @IsNotEmpty()
+  productId: string;
+
+  @IsNumber()
+  @IsNotEmpty()
+  importedQuantity: number;
+
+  @IsNumber()
+  @IsOptional()
+  costPrice?: number;
+
+  @IsDateString()
+  @IsOptional()
+  expiryDate?: string;
+
+  @IsOptional()
+  isGift?: boolean;
+}
+
+export class CreateImportOrderDto {
+  @IsString()
+  @IsNotEmpty()
+  branchId: string;
+
+  @IsString()
+  @IsOptional()
+  distributorId?: string;
+
+  @IsString()
+  @IsOptional()
+  invoiceName?: string;
+
+  @IsString()
+  @IsOptional()
+  personnelName?: string;
+
+  @IsDateString()
+  @IsOptional()
+  importDate?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+
+  @IsNumber()
+  @IsOptional()
+  taxAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  discountAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  shippingFee?: number;
+
+  @IsNumber()
+  @IsOptional()
+  totalAmount?: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ImportOrderItemDto)
+  items: ImportOrderItemDto[];
+}
+
+export class UpdateImportOrderDto {
+  @IsString()
+  @IsOptional()
+  distributorId?: string;
+
+  @IsString()
+  @IsOptional()
+  invoiceName?: string;
+
+  @IsString()
+  @IsOptional()
+  personnelName?: string;
+
+  @IsDateString()
+  @IsOptional()
+  importDate?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+
+  @IsNumber()
+  @IsOptional()
+  taxAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  discountAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  shippingFee?: number;
+
+  @IsNumber()
+  @IsOptional()
+  totalAmount?: number;
+}

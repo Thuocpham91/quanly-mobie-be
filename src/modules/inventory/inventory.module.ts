@@ -8,6 +8,7 @@ import { Stocktake } from './entities/stocktake.entity';
 import { StocktakeItem } from './entities/stocktake-item.entity';
 import { InventoryTransfer } from './entities/inventory-transfer.entity';
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
+import { InventoryImportOrder } from './entities/inventory-import-order.entity';
 import { Product } from '../products/entities/product.entity';
 import { ProductUnit } from '../products/entities/product-unit.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
@@ -21,6 +22,7 @@ import { Distributor } from '../distributors/entities/distributor.entity';
     StocktakeItem,
     InventoryTransfer,
     InventoryTransferItem,
+    InventoryImportOrder,
     Product,
     ProductUnit,
     OrderItem,

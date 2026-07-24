@@ -267,43 +267,49 @@ export class OrdersService {
       }
     }
 
-    // Gửi thông báo thời gian thực nếu người tạo là Nhân viên
+    // Gửi thông báo Firebase FCM & Hộp thư đến cho Admin/Quản lý khi có đơn hàng mới
     try {
       const creatorRole = await this.userBranchRoleRepository.findOne({
         where: { userId, branchId, isActive: true },
         relations: ['role', 'user'],
       });
 
-      if (creatorRole && creatorRole.role.name === 'Nhân viên') {
-        // Tìm tất cả quản lý thuộc chi nhánh này
-        const branchManagers = await this.userBranchRoleRepository.find({
-          where: { branchId, role: { name: 'Quản lý' }, isActive: true },
+      const isCreatorAdmin = creatorRole && creatorRole.role.name === 'Admin';
+
+      // Gửi thông báo cho Admin nếu đơn được tạo bởi nhân viên hoặc người dùng khác
+      if (!isCreatorAdmin) {
+        // Tìm tất cả Quản lý & Admin trong hệ thống
+        const adminsAndManagers = await this.userBranchRoleRepository.find({
+          where: { isActive: true },
+          relations: ['role'],
         });
 
-        // Tìm tất cả admin trong hệ thống
-        const admins = await this.userBranchRoleRepository.find({
-          where: { role: { name: 'Admin' }, isActive: true },
-        });
-
-        // Kết hợp danh sách người nhận (loại bỏ trùng lặp)
         const recipientIds = new Set<string>();
-        branchManagers.forEach((m) => recipientIds.add(m.userId));
-        admins.forEach((a) => recipientIds.add(a.userId));
+        adminsAndManagers.forEach((ubr) => {
+          const roleName = ubr.role?.name?.toLowerCase() || '';
+          if (roleName.includes('admin') || roleName.includes('quản lý') || roleName.includes('manager')) {
+            recipientIds.add(ubr.userId);
+          }
+        });
 
-        // Loại bỏ chính người tạo khỏi danh sách nhận thông báo
+        // Loại bỏ chính người tạo (nếu có)
         recipientIds.delete(userId);
 
-        const creatorName = creatorRole.user?.fullName || 'Nhân viên';
-        const orderMessage = `${creatorName} vừa tạo đơn hàng mới ${savedOrder.orderCode} trị giá ${savedOrder.totalAmount.toLocaleString('vi-VN')}đ`;
+        const creatorName = creatorRole?.user?.fullName || 'Nhân viên';
+        const formattedAmount = Number(savedOrder.totalAmount || 0).toLocaleString('vi-VN');
+        const orderTitle = `📦 Đơn hàng mới ${savedOrder.orderCode}`;
+        const orderMessage = `Nhân viên ${creatorName} vừa tạo đơn hàng ${savedOrder.orderCode} trị giá ${formattedAmount}₫`;
 
         for (const recipientId of recipientIds) {
-          this.notificationsService.sendNotificationToUser(recipientId, {
-            title: 'Đơn hàng mới',
+          await this.notificationsService.sendNotificationToUser(recipientId, {
+            title: orderTitle,
             content: orderMessage,
-            type: 'success',
+            type: 'ORDER_CREATED',
             metadata: {
               orderId: savedOrder.id,
               orderCode: savedOrder.orderCode,
+              totalAmount: savedOrder.totalAmount,
+              creatorName,
             },
           });
         }

@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { Product } from '../../products/entities/product.entity';
 import { Branch } from '../../branches/entities/branch.entity';
 import { Distributor } from '../../distributors/entities/distributor.entity';
+import { InventoryImportOrder } from './inventory-import-order.entity';
 
 @Entity('inventory_batches')
 export class InventoryBatch {
@@ -61,6 +62,13 @@ export class InventoryBatch {
 
   @Column({ nullable: true })
   personnelName: string;
+
+  @Column({ nullable: true })
+  importOrderId: string | null;
+
+  @ManyToOne(() => InventoryImportOrder, (order) => order.batches, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'importOrderId' })
+  importOrder: InventoryImportOrder;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -4,7 +4,7 @@ import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import { InventoryService } from './inventory.service';
-import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto } from './dto/inventory.dto';
+import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto, CreateImportOrderDto, UpdateImportOrderDto } from './dto/inventory.dto';
 import { CreateStocktakeDto, UpdateStocktakeDto, ApproveStocktakeDto } from './dto/stocktake.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -167,4 +167,40 @@ export class InventoryController {
     const filePath = path.resolve('uploads', 'legacy', filename);
     return this.inventoryService.importLegacyFromFile(filePath, branchId, req.user.id);
   }
+
+  // ==========================================
+  // IMPORT ORDERS (PHIếU NHậP KHO)
+  // ==========================================
+
+  @Get('import-orders')
+  findAllImportOrders(
+    @Query('branchId') branchId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page as string, 10) || 1;
+    const limitNum = parseInt(limit as string, 10) || 10;
+    return this.inventoryService.findAllImportOrders(branchId, pageNum, limitNum);
+  }
+
+  @Get('import-orders/:id')
+  findOneImportOrder(@Param('id') id: string) {
+    return this.inventoryService.findOneImportOrder(id);
+  }
+
+  @Post('import-orders')
+  createImportOrder(@Body() dto: CreateImportOrderDto, @Request() req) {
+    return this.inventoryService.createImportOrder(dto, req.user.id);
+  }
+
+  @Patch('import-orders/:id')
+  updateImportOrder(@Param('id') id: string, @Body() dto: UpdateImportOrderDto) {
+    return this.inventoryService.updateImportOrder(id, dto);
+  }
+
+  @Delete('import-orders/:id')
+  deleteImportOrder(@Param('id') id: string) {
+    return this.inventoryService.deleteImportOrder(id);
+  }
 }
+

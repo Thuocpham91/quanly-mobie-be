@@ -10,12 +10,13 @@ import { PaginatedResult } from '../common/interfaces/paginated-result.interface
 import { Product } from '../products/entities/product.entity';
 import { Distributor } from '../distributors/entities/distributor.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
-import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto } from './dto/inventory.dto';
+import { CreateInventoryBatchDto, UpdateInventoryBatchDto, ExportStockDto, TransferStockDto, CreateTransferDto, CreateImportOrderDto, UpdateImportOrderDto } from './dto/inventory.dto';
 import { CreateStocktakeDto, UpdateStocktakeDto } from './dto/stocktake.dto';
 import { Stocktake, StocktakeStatus } from './entities/stocktake.entity';
 import { StocktakeItem } from './entities/stocktake-item.entity';
 import { InventoryTransfer, TransferStatus } from './entities/inventory-transfer.entity';
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
+import { InventoryImportOrder } from './entities/inventory-import-order.entity';
 import { parseLegacyImportRow } from './legacy-import.util';
 
 export interface InventorySummary {
@@ -46,6 +47,8 @@ export class InventoryService {
     private transferRepository: Repository<InventoryTransfer>,
     @InjectRepository(InventoryTransferItem)
     private transferItemRepository: Repository<InventoryTransferItem>,
+    @InjectRepository(InventoryImportOrder)
+    private importOrderRepository: Repository<InventoryImportOrder>,
   ) {}
 
   // ==========================================
@@ -138,7 +141,14 @@ export class InventoryService {
       ...createDto,
       currentQuantity: createDto.currentQuantity ?? createDto.importedQuantity,
     });
-    return this.inventoryRepository.save(batch);
+    const saved = await this.inventoryRepository.save(batch);
+
+    // Cập nhật giá nhập (basePrice) của sản phẩm theo giá nhập mới nhất
+    if (createDto.costPrice != null && createDto.costPrice > 0) {
+      await this.productsRepository.update(createDto.productId, { basePrice: createDto.costPrice });
+    }
+
+    return saved;
   }
 
   async bulkCreateBatches(createDtos: CreateInventoryBatchDto[]): Promise<InventoryBatch[]> {
@@ -146,7 +156,16 @@ export class InventoryService {
       ...dto,
       currentQuantity: dto.currentQuantity ?? dto.importedQuantity,
     }));
-    return this.inventoryRepository.save(batches);
+    const saved = await this.inventoryRepository.save(batches);
+
+    // Cập nhật giá nhập (basePrice) của từng sản phẩm theo giá nhập mới nhất
+    for (const dto of createDtos) {
+      if (dto.costPrice != null && dto.costPrice > 0) {
+        await this.productsRepository.update(dto.productId, { basePrice: dto.costPrice });
+      }
+    }
+
+    return saved;
   }
 
   async updateBatch(id: string, updateDto: UpdateInventoryBatchDto): Promise<InventoryBatch> {
@@ -836,4 +855,139 @@ export class InventoryService {
     const buffer = await fs.promises.readFile(resolved);
     return this.importLegacyFromExcel(buffer, branchId, userId);
   }
+
+  // ==========================================
+  // IMPORT ORDERS (PHIếU NHậP KHO)
+  // ==========================================
+
+  async findAllImportOrders(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<InventoryImportOrder>> {
+    if (branchId === 'undefined' || branchId === 'null' || !branchId) {
+      branchId = undefined;
+    }
+    const whereClause = branchId ? { branchId } : {};
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await this.importOrderRepository.findAndCount({
+      where: whereClause,
+      relations: ['distributor', 'createdBy', 'batches', 'batches.product', 'batches.product.unit'],
+      order: { createdAt: 'DESC' },
+      skip,
+      take: limit,
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async findOneImportOrder(id: string): Promise<InventoryImportOrder> {
+    const order = await this.importOrderRepository.findOne({
+      where: { id },
+      relations: ['distributor', 'createdBy', 'batches', 'batches.product', 'batches.product.unit', 'batches.product.category'],
+    });
+    if (!order) {
+      throw new NotFoundException(`Phểu nhập kho với ID ${id} không tồn tại`);
+    }
+    return order;
+  }
+
+  async createImportOrder(dto: CreateImportOrderDto, userId: string): Promise<InventoryImportOrder> {
+    // Generate unique code: NK-YYYYMMDD-XXXX
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const count = await this.importOrderRepository.count();
+    const code = `NK-${dateStr}-${(count + 1).toString().padStart(4, '0')}`;
+
+    // Create the order header
+    const order = this.importOrderRepository.create({
+      code,
+      branchId: dto.branchId,
+      distributorId: dto.distributorId || undefined,
+      invoiceName: dto.invoiceName,
+      personnelName: dto.personnelName,
+      importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
+      note: dto.note,
+      taxAmount: dto.taxAmount || 0,
+      discountAmount: dto.discountAmount || 0,
+      shippingFee: dto.shippingFee || 0,
+      totalAmount: dto.totalAmount || 0,
+      createdById: userId,
+    });
+    const savedOrder = await this.importOrderRepository.save(order);
+
+    // Create batches for each item, linked to this order
+    for (const item of dto.items) {
+      const batch = this.inventoryRepository.create({
+        productId: item.productId,
+        branchId: dto.branchId,
+        distributorId: dto.distributorId || undefined,
+        importedQuantity: item.importedQuantity,
+        currentQuantity: item.importedQuantity,
+        costPrice: item.costPrice || 0,
+        importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
+        expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined,
+        invoiceName: dto.invoiceName,
+        personnelName: dto.personnelName,
+        isGift: item.isGift || false,
+        importOrderId: savedOrder.id,
+      });
+      const savedBatch = await this.inventoryRepository.save(batch);
+
+      // Update product basePrice
+      if (item.costPrice && item.costPrice > 0) {
+        await this.productsRepository.update(item.productId, { basePrice: item.costPrice });
+      }
+
+      // Log the import
+      const log = this.inventoryLogRepository.create({
+        productId: item.productId,
+        branchId: dto.branchId,
+        type: StockMovementType.IMPORT,
+        quantity: item.importedQuantity,
+        batchId: savedBatch.id,
+        referenceCode: code,
+        note: `Nhập kho theo phiểu ${code}`,
+        createdById: userId,
+      });
+      await this.inventoryLogRepository.save(log);
+    }
+
+    return this.findOneImportOrder(savedOrder.id);
+  }
+
+  async updateImportOrder(id: string, dto: UpdateImportOrderDto): Promise<InventoryImportOrder> {
+    const order = await this.importOrderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Phểu nhập kho với ID ${id} không tồn tại`);
+    }
+    await this.importOrderRepository.update(id, {
+      ...dto,
+      importDate: dto.importDate ? new Date(dto.importDate) : undefined,
+    });
+    return this.findOneImportOrder(id);
+  }
+
+  async deleteImportOrder(id: string): Promise<void> {
+    const order = await this.importOrderRepository.findOne({
+      where: { id },
+      relations: ['batches'],
+    });
+    if (!order) {
+      throw new NotFoundException(`Phểu nhập kho với ID ${id} không tồn tại`);
+    }
+    // Set NULL importOrderId on batches before removing order
+    if (order.batches?.length) {
+      await this.inventoryRepository.update(
+        order.batches.map(b => b.id),
+        { importOrderId: null },
+      );
+    }
+    await this.importOrderRepository.remove(order);
+  }
 }
+
