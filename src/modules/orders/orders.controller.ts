@@ -92,6 +92,16 @@ export class OrdersController {
     return this.ordersService.updateStatus(id, branchId, status, userId);
   }
 
+  @Put(':id/date')
+  updateDate(
+    @Request() req,
+    @Param('id') id: string,
+    @Body('createdAt') createdAt: string,
+  ) {
+    const branchId = req.headers['x-branch-id'];
+    return this.ordersService.updateOrderDate(id, branchId, createdAt);
+  }
+
   @Post('import')
   @Permissions('sales.create')
   @UseInterceptors(FileInterceptor('file'))

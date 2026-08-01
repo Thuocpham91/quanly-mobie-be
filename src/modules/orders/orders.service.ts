@@ -227,6 +227,7 @@ export class OrdersService {
       status: createOrderDto.status || OrderStatus.COMPLETED,
       paymentMethod: createOrderDto.paymentMethod,
       notes: createOrderDto.notes,
+      ...(createOrderDto.createdAt ? { createdAt: new Date(createOrderDto.createdAt) } : {}),
     });
 
     const savedOrder = await this.ordersRepository.save(order);
@@ -1274,6 +1275,19 @@ export class OrdersService {
     }
 
     order.status = status;
+    return this.ordersRepository.save(order);
+  }
+
+  async updateOrderDate(
+    id: string,
+    branchId: string,
+    createdAt: string,
+  ): Promise<Order> {
+    const order = await this.findOne(id, branchId);
+    if (!createdAt) {
+      throw new BadRequestException('Ngày hóa đơn không hợp lệ');
+    }
+    order.createdAt = new Date(createdAt);
     return this.ordersRepository.save(order);
   }
 }

@@ -71,4 +71,8 @@ export class CreateOrderDto {
   @IsOptional()
   @Type(() => Number)
   totalQuantity?: number;
+
+  @IsString()
+  @IsOptional()
+  createdAt?: string;
 }
