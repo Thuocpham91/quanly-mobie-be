@@ -4,9 +4,12 @@ import { ValidationPipe, BadRequestException, RequestMethod } from '@nestjs/comm
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'path';
+import morgan from 'morgan';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.use(morgan('dev'));
 
   const corsOriginsEnv = process.env.CORS_ORIGINS;
   app.enableCors({
