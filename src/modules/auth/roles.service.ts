@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
+import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class RolesService {
@@ -13,8 +14,18 @@ export class RolesService {
     private permissionRepo: Repository<Permission>,
   ) {}
 
-  async findAll() {
-    return this.roleRepo.find({ relations: ['permissions'] });
+  async findAll(page = 1, limit = 10): Promise<PaginatedResult<Role>> {
+    const pageNumber = Math.max(1, page);
+    const [data, total] = await this.roleRepo.findAndCount({
+      relations: ['permissions'],
+      skip: (pageNumber - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      data,
+      meta: { total, page: pageNumber, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
 
   async findAllPermissions() {

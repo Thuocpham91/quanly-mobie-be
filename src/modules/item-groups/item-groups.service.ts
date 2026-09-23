@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ItemGroup } from './entities/item-group.entity';
 import { CreateItemGroupDto, UpdateItemGroupDto } from './dto/item-group.dto';
+import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class ItemGroupsService {
@@ -11,8 +12,18 @@ export class ItemGroupsService {
     private itemGroupsRepository: Repository<ItemGroup>,
   ) {}
 
-  async findAll(): Promise<ItemGroup[]> {
-    return this.itemGroupsRepository.find({ order: { name: 'ASC' } });
+  async findAll(page = 1, limit = 10): Promise<PaginatedResult<ItemGroup>> {
+    const pageNumber = Math.max(1, page);
+    const [data, total] = await this.itemGroupsRepository.findAndCount({
+      order: { name: 'ASC' },
+      skip: (pageNumber - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      data,
+      meta: { total, page: pageNumber, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
 
   async findOne(id: string): Promise<ItemGroup> {

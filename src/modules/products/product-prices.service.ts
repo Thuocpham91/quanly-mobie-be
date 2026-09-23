@@ -5,6 +5,7 @@ import { ProductBranchPrice } from './entities/product-branch-price.entity';
 import { Product } from './entities/product.entity';
 import { Branch } from '../branches/entities/branch.entity';
 import { UpdateProductBranchPriceDto } from './dto/product-price.dto';
+import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class ProductPricesService {
@@ -17,18 +18,20 @@ export class ProductPricesService {
     private readonly branchRepository: Repository<Branch>,
   ) {}
 
-  async getPricesForProduct(productId: string) {
+  async getPricesForProduct(productId: string, page = 1, limit = 10): Promise<PaginatedResult<ProductBranchPrice>> {
     const product = await this.productRepository.findOne({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Product with ID ${productId} not found`);
     }
 
-    const branchPrices = await this.productBranchPriceRepository.find({
+    const [data, total] = await this.productBranchPriceRepository.findAndCount({
       where: { productId },
       relations: ['branch'],
+      skip: (page - 1) * limit,
+      take: limit,
     });
 
-    return branchPrices;
+    return { data, meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) } };
   }
 
   async setBranchPrice(productId: string, branchId: string, dto: UpdateProductBranchPriceDto) {

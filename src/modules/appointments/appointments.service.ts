@@ -82,10 +82,17 @@ export class AppointmentsService {
     await this.appointmentsRepository.remove(appointment);
   }
 
-  async findByCustomer(customerId: string): Promise<Appointment[]> {
-    return this.appointmentsRepository.find({
+  async findByCustomer(customerId: string, page = 1, limit = 10): Promise<PaginatedResult<Appointment>> {
+    const [data, total] = await this.appointmentsRepository.findAndCount({
       where: { customerId },
       order: { dateTime: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
 }

@@ -25,8 +25,14 @@ export class AppointmentsController {
   }
 
   @Get('customer/:customerId')
-  findByCustomer(@Param('customerId') customerId: string) {
-    return this.appointmentsService.findByCustomer(customerId);
+  findByCustomer(
+    @Param('customerId') customerId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page || '1', 10) || 1;
+    const limitNum = parseInt(limit || '10', 10) || 10;
+    return this.appointmentsService.findByCustomer(customerId, pageNum, limitNum);
   }
   @Get(':id')
   findOne(@Param('id') id: string) {

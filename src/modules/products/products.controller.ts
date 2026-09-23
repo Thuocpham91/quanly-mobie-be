@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, UseInterceptors, UploadedFile, BadRequestException, Request } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService } from './products.service';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -16,21 +17,35 @@ export class ProductsController {
     return this.productsService.create(createProductDto);
   }
 
+  @Post('import')
+  @Permissions('products.create_edit')
+  @UseInterceptors(FileInterceptor('file'))
+  async importProducts(@UploadedFile() file: any, @Query('branchId') queryBranchId?: string, @Request() req?: any) {
+    if (!file?.buffer) {
+      throw new BadRequestException('Vui lòng tải lên tệp tin Excel');
+    }
+
+    const branchId = queryBranchId ?? req?.body?.branchId ?? req?.query?.branchId;
+
+    return this.productsService.importFromExcel(file.buffer, branchId, req?.user?.id);
+  }
+
   @Get()
   @Permissions('products.view', 'sales.create')
   findAll(
     @Query('isService') isService?: string,
+    @Query('search') search?: string,
     @Query('page') page = '1',
-    @Query('limit') limit = '0',
+    @Query('limit') limit = '10',
   ) {
     let filterIsService: boolean | undefined = undefined;
     if (isService === 'true') filterIsService = true;
     if (isService === 'false') filterIsService = false;
 
     const pageNumber = Number(page) || 1;
-    const limitNumber = Number(limit) || 0;
+    const limitNumber = Number(limit) || 10;
 
-    return this.productsService.findAll(filterIsService, pageNumber, limitNumber);
+    return this.productsService.findAll(filterIsService, pageNumber, limitNumber, search);
   }
 
   @Get(':id')

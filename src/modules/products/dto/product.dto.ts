@@ -75,6 +75,34 @@ export class CreateProductDto {
   @IsOptional()
   basePrice?: number;
 
+  @IsNumber()
+  @IsOptional()
+  importPrice?: number;
+
+  @IsNumber()
+  @IsOptional()
+  canTraNcc?: number;
+
+  @IsNumber()
+  @IsOptional()
+  tienTraNcc?: number;
+
+  @IsNumber()
+  @IsOptional()
+  totalAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  quantity?: number;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+
+  @IsString()
+  @IsOptional()
+  status?: string;
+
   @IsBoolean()
   @IsOptional()
   isService?: boolean;

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Distributor } from './entities/distributor.entity';
 import { CreateDistributorDto, UpdateDistributorDto } from './dto/distributor.dto';
+import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class DistributorsService {
@@ -16,8 +17,18 @@ export class DistributorsService {
     return this.distributorRepository.save(distributor);
   }
 
-  findAll() {
-    return this.distributorRepository.find({ order: { name: 'ASC' } });
+  async findAll(page = 1, limit = 10): Promise<PaginatedResult<Distributor>> {
+    const pageNumber = Math.max(1, page);
+    const [data, total] = await this.distributorRepository.findAndCount({
+      order: { name: 'ASC' },
+      skip: (pageNumber - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      data,
+      meta: { total, page: pageNumber, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
 
   async findOne(id: string) {

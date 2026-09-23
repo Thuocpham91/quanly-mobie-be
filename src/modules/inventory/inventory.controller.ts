@@ -74,8 +74,14 @@ export class InventoryController {
   // STOCKTAKES (KIỂM KHO)
   // ==========================================
   @Get('stocktakes')
-  findAllStocktakes(@Query('branchId') branchId?: string) {
-    return this.inventoryService.findAllStocktakes(branchId);
+  findAllStocktakes(
+    @Query('branchId') branchId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page || '1', 10) || 1;
+    const limitNum = parseInt(limit || '10', 10) || 10;
+    return this.inventoryService.findAllStocktakes(branchId, pageNum, limitNum);
   }
 
   @Get('stocktakes/:id')
@@ -106,9 +112,13 @@ export class InventoryController {
   @Get('transfers')
   findAllTransfers(
     @Query('branchId') branchId?: string,
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.inventoryService.findAllTransfers(branchId, status as any);
+    const pageNum = parseInt(page || '1', 10) || 1;
+    const limitNum = parseInt(limit || '10', 10) || 10;
+    return this.inventoryService.findAllTransfers(branchId, status as any, pageNum, limitNum);
   }
 
   @Get('transfers/:id')
@@ -141,6 +151,12 @@ export class InventoryController {
   @UseInterceptors(FileInterceptor('file'))
   importLegacy(@UploadedFile() file: any, @Query('branchId') branchId: string, @Request() req) {
     return this.inventoryService.importLegacyFromExcel(file?.buffer, branchId, req.user.id);
+  }
+
+  @Post('import-kiotviet')
+  @UseInterceptors(FileInterceptor('file'))
+  importKiotViet(@UploadedFile() file: any, @Query('branchId') branchId: string, @Request() req) {
+    return this.inventoryService.importFromKiotViet(file?.buffer, branchId, req.user.id);
   }
 
   @Post('upload-legacy')

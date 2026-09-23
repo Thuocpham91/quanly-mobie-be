@@ -72,6 +72,27 @@ export class Product {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   basePrice: number;
 
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, nullable: true })
+  importPrice: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, nullable: true })
+  canTraNcc: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, nullable: true })
+  tienTraNcc: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0, nullable: true })
+  totalAmount: number;
+
+  @Column({ type: 'int', default: 0, nullable: true })
+  quantity: number;
+
+  @Column({ nullable: true })
+  note: string;
+
+  @Column({ nullable: true })
+  status: string;
+
   @OneToMany('ProductBranchPrice', 'product', { cascade: true })
   branchPrices: any[];
 

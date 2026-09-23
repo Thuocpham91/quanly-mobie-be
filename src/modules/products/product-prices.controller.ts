@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
 import { ProductPricesService } from './product-prices.service';
 import { UpdateProductBranchPriceDto } from './dto/product-price.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -12,8 +12,16 @@ export class ProductPricesController {
 
   @Get()
   @Permissions('products.view')
-  getPricesForProduct(@Param('productId') productId: string) {
-    return this.productPricesService.getPricesForProduct(productId);
+  getPricesForProduct(
+    @Param('productId') productId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.productPricesService.getPricesForProduct(
+      productId,
+      parseInt(page || '1', 10) || 1,
+      parseInt(limit || '10', 10) || 10,
+    );
   }
 
   @Put(':branchId')

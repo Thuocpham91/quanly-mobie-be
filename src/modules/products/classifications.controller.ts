@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { ClassificationsService } from './classifications.service';
 import { CreateClassificationDto, UpdateClassificationDto } from './dto/classification.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -14,8 +14,10 @@ export class ClassificationsController {
   }
 
   @Get()
-  findAll() {
-    return this.classificationsService.findAll();
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page || '1', 10) || 1;
+    const limitNum = parseInt(limit || '10', 10) || 10;
+    return this.classificationsService.findAll(pageNum, limitNum);
   }
 
   @Get(':id')

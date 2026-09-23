@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +18,7 @@ import { InventoryTransfer, TransferStatus } from './entities/inventory-transfer
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
 import { InventoryImportOrder, ImportOrderStatus } from './entities/inventory-import-order.entity';
 import { parseLegacyImportRow } from './legacy-import.util';
+import { parseKiotVietImportRow } from './kiotviet-import.util';
 
 export interface InventorySummary {
   product: Product;
@@ -244,7 +245,7 @@ export class InventoryService {
     }
   }
 
-  async getStockHistory(branchId?: string, page = 1, limit = 10): Promise<{ data: any[]; total: number }> {
+  async getStockHistory(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<any>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
@@ -256,7 +257,10 @@ export class InventoryService {
       skip: (page - 1) * limit,
       take: limit,
     });
-    return { data, total };
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
 
   // Returns a map of productId -> totalQuantitySold (from COMPLETED orders only)
@@ -285,16 +289,20 @@ export class InventoryService {
   // STOCKTAKES (KIỂM KHO)
   // ==========================================
 
-  async findAllStocktakes(branchId?: string): Promise<Stocktake[]> {
+  async findAllStocktakes(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<Stocktake>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
     const whereClause = branchId ? { branchId } : {};
-    return this.stocktakeRepository.find({
+    const [data, total] = await this.stocktakeRepository.findAndCount({
       where: whereClause,
       relations: ['createdBy', 'approvedBy', 'items', 'items.product'],
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+
+    return { data, meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) } };
   }
 
   async findOneStocktake(id: string): Promise<Stocktake> {
@@ -658,7 +666,7 @@ export class InventoryService {
     return updatedTransfer;
   }
 
-  async findAllTransfers(branchId?: string, status?: TransferStatus): Promise<InventoryTransfer[]> {
+  async findAllTransfers(branchId?: string, status?: TransferStatus, page = 1, limit = 10): Promise<PaginatedResult<InventoryTransfer>> {
     const query = this.transferRepository.createQueryBuilder('transfer')
       .leftJoinAndSelect('transfer.fromBranch', 'fromBranch')
       .leftJoinAndSelect('transfer.toBranch', 'toBranch')
@@ -677,7 +685,12 @@ export class InventoryService {
       query.andWhere('transfer.status = :status', { status });
     }
 
-    return query.getMany();
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { data, meta: { total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) } };
   }
 
   async findOneTransfer(id: string): Promise<InventoryTransfer> {
@@ -1043,5 +1056,171 @@ export class InventoryService {
     }
     await this.importOrderRepository.remove(order);
   }
-}
 
+  // ==========================================
+  // IMPORT FROM KIOTVIET (DanhSachChiTietNhapHang)
+  // ==========================================
+
+  async importFromKiotViet(
+    buffer: Buffer,
+    branchId: string,
+    userId: string,
+  ): Promise<{ imported: number; errors: any[]; errorFile?: string }> {
+    if (!buffer) throw new Error('File buffer is required');
+    if (!branchId) throw new Error('branchId query parameter is required');
+
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+
+    const results = { imported: 0, errors: [] as any[] };
+    const importOrdersMap = new Map<string, InventoryImportOrder>();
+
+    for (const [index, row] of rows.entries()) {
+      try {
+        const parsed = parseKiotVietImportRow(row);
+
+        if (parsed.errors.length > 0) {
+          results.errors.push({
+            row: index + 2,
+            reason: parsed.errors.map((e) => `${e.field}: ${e.reason}`).join(' | '),
+          });
+          continue;
+        }
+
+        const { quantity, importPrice, invoiceCode, supplierCode, supplierName, supplierPhone, supplierAddress, personnelName, importDate, totalOrderAmount, productCode, barcode, productName, brand } = parsed;
+
+        // ---- Nha cung cap ----
+        let distributor: Distributor | null = null;
+        if (supplierCode || supplierName || supplierPhone) {
+          const whereClauses: any[] = [];
+          if (supplierCode) whereClauses.push({ code: supplierCode });
+          if (supplierName) whereClauses.push({ name: supplierName });
+          if (supplierPhone) whereClauses.push({ phone: supplierPhone });
+          distributor = (await this.distributorRepository.findOne({ where: whereClauses })) as Distributor | null;
+          if (!distributor) {
+            const newDist = this.distributorRepository.create({
+              name: supplierName || supplierCode || 'Nha cung cap moi',
+              phone: supplierPhone || undefined,
+              address: supplierAddress || undefined,
+              code: supplierCode || undefined,
+            } as any);
+            distributor = (await this.distributorRepository.save(newDist as any)) as Distributor;
+          }
+        }
+
+        // ---- San pham ----
+        const productIdentifier = (productCode || barcode)!;
+        const whereProduct: any[] = [];
+        if (productCode) whereProduct.push({ productCode });
+        if (barcode) whereProduct.push({ barcode });
+        let product = await this.productsRepository.findOne({ where: whereProduct });
+
+        if (!product) {
+          try {
+            const newProduct = this.productsRepository.create({
+              name: productName || productIdentifier,
+              productCode: productCode || undefined,
+              barcode: barcode || undefined,
+              manufacturer: brand || undefined,
+              basePrice: importPrice > 0 ? importPrice : 0,
+            } as any);
+            product = await this.productsRepository.save(newProduct as any);
+          } catch {
+            results.errors.push({ row: index + 2, product: productIdentifier, reason: 'Khong the tao san pham moi' });
+            continue;
+          }
+        }
+
+        if (importPrice > 0 && product) {
+          await this.productsRepository.update(product.id, { basePrice: importPrice });
+        }
+
+        // ---- Phieu nhap kho ----
+        let importOrder: InventoryImportOrder | null = null;
+        if (invoiceCode) {
+          const mapKey = `${branchId}_${invoiceCode.toLowerCase()}`;
+          importOrder = importOrdersMap.get(mapKey) || null;
+          if (!importOrder) {
+            importOrder = await this.importOrderRepository.findOne({
+              where: [{ code: invoiceCode, branchId }, { invoiceName: invoiceCode, branchId }],
+            });
+            if (!importOrder) {
+              let code = invoiceCode;
+              const existingCode = await this.importOrderRepository.findOne({ where: { code } });
+              if (existingCode) {
+                code = `KV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+              }
+              const newOrder = this.importOrderRepository.create({
+                code,
+                invoiceName: invoiceCode,
+                branchId,
+                distributorId: distributor?.id || undefined,
+                personnelName: personnelName || undefined,
+                importDate: importDate || new Date(),
+                createdById: userId,
+                totalAmount: totalOrderAmount || 0,
+                status: ImportOrderStatus.COMPLETED,
+              });
+              importOrder = await this.importOrderRepository.save(newOrder);
+            }
+            if (importOrder) {
+              importOrdersMap.set(mapKey, importOrder);
+            }
+          }
+        }
+
+        // ---- Tao inventory batch ----
+        const batchData: Partial<InventoryBatch> = {
+          productId: product!.id,
+          branchId,
+          importedQuantity: quantity,
+          currentQuantity: quantity,
+          costPrice: importPrice,
+          importDate,
+          invoiceName: invoiceCode || undefined,
+          personnelName: personnelName || undefined,
+          distributorId: distributor?.id || undefined,
+          importOrderId: importOrder?.id || undefined,
+        };
+        const batch = this.inventoryRepository.create(batchData as any);
+        const saved = await this.inventoryRepository.save(batch as any);
+
+        const log = this.inventoryLogRepository.create({
+          productId: product!.id,
+          branchId,
+          type: StockMovementType.IMPORT,
+          quantity,
+          batchId: saved.id,
+          referenceCode: importOrder?.code || ('KV-' + Date.now()),
+          note: `KiotViet import dong ${index + 2}`,
+          createdById: userId,
+        } as any);
+        await this.inventoryLogRepository.save(log as any);
+        results.imported += 1;
+      } catch (err) {
+        results.errors.push({ row: index + 2, reason: err.message || err });
+      }
+    }
+
+    if (results.errors.length > 0) {
+      try {
+        const errRows = results.errors.map((e) => ({ row: e.row ?? '', product: e.product ?? '', reason: e.reason || JSON.stringify(e) }));
+        const ws = xlsx.utils.json_to_sheet(errRows);
+        const wb = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(wb, ws, 'Errors');
+        const uploadPath = path.resolve('uploads', 'legacy');
+        if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+        const filename = `kiotviet_import_errors_${Date.now()}.xlsx`;
+        const filePath = path.join(uploadPath, filename);
+        xlsx.writeFile(wb, filePath);
+        results['errorFile'] = filePath;
+      } catch (writeErr) {
+        results.errors.push({ row: null, reason: `Failed to write error file: ${writeErr.message || writeErr}` });
+      }
+    }
+
+    return results;
+  }
+}

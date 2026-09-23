@@ -15,10 +15,22 @@ import { BranchesModule } from '../branches/branches.module';
 import { ProductBranchPrice } from './entities/product-branch-price.entity';
 import { ProductPricesController } from './product-prices.controller';
 import { ProductPricesService } from './product-prices.service';
+import { InventoryBatch } from '../inventory/entities/inventory-batch.entity';
+import { InventoryLog } from '../inventory/entities/inventory-log.entity';
+import { InventoryImportOrder } from '../inventory/entities/inventory-import-order.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product, ProductUnit, Classification, Unit, ProductBranchPrice]),
+    TypeOrmModule.forFeature([
+      Product,
+      ProductUnit,
+      Classification,
+      Unit,
+      ProductBranchPrice,
+      InventoryBatch,
+      InventoryLog,
+      InventoryImportOrder,
+    ]),
     forwardRef(() => AuthModule),
     BranchesModule,
   ],
