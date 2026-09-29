@@ -14,72 +14,93 @@ export enum ImportOrderStatus {
   CANCELLED = 'CANCELLED',
 }
 
-@Entity('inventory_import_orders')
-export class InventoryImportOrder {
+@Entity('inventory_orders')
+export class InventoryOrder {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ unique: true })
-  code: string;
+  code!: string;
 
   @Column()
-  branchId: string;
+  branchId!: string;
 
   @ManyToOne(() => Branch, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'branchId' })
-  branch: Branch;
+  branch!: Branch;
 
   @Column({ nullable: true })
-  distributorId: string;
+  distributorId!: string;
 
   @ManyToOne(() => Distributor, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'distributorId' })
-  distributor: Distributor;
+  distributor!: Distributor;
 
   @Column({ nullable: true })
-  invoiceName: string;
+  invoiceName!: string;
 
   @Column({ nullable: true })
-  personnelName: string;
+  invoiceNumber!: string;
 
   @Column({ nullable: true })
-  importDate: Date;
+  personnelName!: string;
 
   @Column({ nullable: true })
-  note: string;
+  importDate!: Date;
+
+  @Column({ nullable: true })
+  note!: string;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  taxAmount: number;
+  totalProductAmount!: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  discountAmount: number;
+  taxAmount!: number;
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  discountPercent!: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  shippingFee: number;
+  discountAmount!: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  totalAmount: number;
+  shippingFee!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  debtAmount!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  paidAmount!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  totalQuantity!: number;
+
+  @Column({ type: 'int', default: 0 })
+  totalItemCount!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  totalAmount!: number;
 
   @Column({
     type: 'enum',
     enum: ImportOrderStatus,
     default: ImportOrderStatus.COMPLETED,
   })
-  status: ImportOrderStatus;
+  status!: ImportOrderStatus;
 
   @Column({ nullable: true })
-  createdById: string;
+  createdById!: string;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'createdById' })
-  createdBy: User;
+  createdBy!: User;
 
   @OneToMany(() => InventoryBatch, (batch) => batch.importOrder)
-  batches: InventoryBatch[];
+  batches!: InventoryBatch[];
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

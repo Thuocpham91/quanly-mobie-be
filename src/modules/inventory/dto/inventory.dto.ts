@@ -26,6 +26,10 @@ export class CreateInventoryBatchDto {
   @IsOptional()
   costPrice?: number;
 
+  @IsNumber()
+  @IsOptional()
+  lineTotal?: number;
+
   @IsDateString()
   @IsOptional()
   importDate?: string;
@@ -66,6 +70,10 @@ export class UpdateInventoryBatchDto {
   @IsNumber()
   @IsOptional()
   costPrice?: number;
+
+  @IsNumber()
+  @IsOptional()
+  lineTotal?: number;
 }
 
 export class ExportStockDto {
@@ -153,6 +161,10 @@ export class ImportOrderItemDto {
   @IsNumber()
   @IsOptional()
   costPrice?: number;
+
+  @IsNumber()
+  @IsOptional()
+  lineTotal?: number;
 
   @IsDateString()
   @IsOptional()

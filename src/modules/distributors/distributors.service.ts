@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { Distributor } from './entities/distributor.entity';
 import { CreateDistributorDto, UpdateDistributorDto } from './dto/distributor.dto';
 import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
@@ -17,17 +17,36 @@ export class DistributorsService {
     return this.distributorRepository.save(distributor);
   }
 
-  async findAll(page = 1, limit = 10): Promise<PaginatedResult<Distributor>> {
+  async findAll(page = 1, limit = 10, search?: string, address?: string): Promise<PaginatedResult<Distributor>> {
     const pageNumber = Math.max(1, page);
+    const limitNumber = Math.max(1, limit);
+    const searchTerm = search?.trim();
+    const addressTerm = address?.trim();
+    const where = searchTerm
+      ? [
+          { name: ILike(`%${searchTerm}%`), ...(addressTerm ? { address: ILike(`%${addressTerm}%`) } : {}) },
+          { code: ILike(`%${searchTerm}%`), ...(addressTerm ? { address: ILike(`%${addressTerm}%`) } : {}) },
+          { phone: ILike(`%${searchTerm}%`), ...(addressTerm ? { address: ILike(`%${addressTerm}%`) } : {}) },
+          { email: ILike(`%${searchTerm}%`), ...(addressTerm ? { address: ILike(`%${addressTerm}%`) } : {}) },
+        ]
+      : addressTerm
+        ? { address: ILike(`%${addressTerm}%`) }
+        : undefined;
     const [data, total] = await this.distributorRepository.findAndCount({
+      where,
       order: { name: 'ASC' },
-      skip: (pageNumber - 1) * limit,
-      take: limit,
+      skip: (pageNumber - 1) * limitNumber,
+      take: limitNumber,
     });
 
     return {
       data,
-      meta: { total, page: pageNumber, limit, totalPages: Math.max(1, Math.ceil(total / limit)) },
+      meta: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.max(1, Math.ceil(total / limitNumber)),
+      },
     };
   }
 

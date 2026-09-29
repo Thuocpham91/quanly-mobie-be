@@ -1,4 +1,4 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,7 +16,7 @@ import { Stocktake, StocktakeStatus } from './entities/stocktake.entity';
 import { StocktakeItem } from './entities/stocktake-item.entity';
 import { InventoryTransfer, TransferStatus } from './entities/inventory-transfer.entity';
 import { InventoryTransferItem } from './entities/inventory-transfer-item.entity';
-import { InventoryImportOrder, ImportOrderStatus } from './entities/inventory-import-order.entity';
+import { InventoryOrder, ImportOrderStatus } from './entities/inventory-order.entity';
 import { parseLegacyImportRow } from './legacy-import.util';
 import { parseKiotVietImportRow } from './kiotviet-import.util';
 
@@ -48,23 +48,41 @@ export class InventoryService {
     private transferRepository: Repository<InventoryTransfer>,
     @InjectRepository(InventoryTransferItem)
     private transferItemRepository: Repository<InventoryTransferItem>,
-    @InjectRepository(InventoryImportOrder)
-    private importOrderRepository: Repository<InventoryImportOrder>,
+    @InjectRepository(InventoryOrder)
+    private importOrderRepository: Repository<InventoryOrder>,
   ) {}
 
   // ==========================================
   // INVENTORY BATCH & SUMMARY
   // ==========================================
-  async findAllBatches(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<InventoryBatch>> {
+  async findAllBatches(
+    branchId?: string,
+    page = 1,
+    limit = 10,
+    productId?: string,
+  ): Promise<PaginatedResult<InventoryBatch>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
-    const whereClause = branchId ? { branchId } : {};
+    if (productId === 'undefined' || productId === 'null' || !productId) {
+      productId = undefined;
+    }
+    const whereClause: any = {};
+    if (branchId) whereClause.branchId = branchId;
+    if (productId) whereClause.productId = productId;
     const skip = (page - 1) * limit;
 
     const [data, total] = await this.inventoryRepository.findAndCount({
       where: whereClause,
-      relations: ['product', 'product.category', 'product.itemGroup', 'distributor'],
+      relations: [
+        'product',
+        'product.category',
+        'product.itemGroup',
+        'product.unit',
+        'distributor',
+        'importOrder',
+        'importOrder.distributor',
+      ],
       order: { createdAt: 'DESC' },
       skip,
       take: limit,
@@ -84,7 +102,15 @@ export class InventoryService {
   async findOneBatch(id: string): Promise<InventoryBatch> {
     const batch = await this.inventoryRepository.findOne({ 
       where: { id }, 
-      relations: ['product', 'product.category', 'product.itemGroup', 'distributor'] 
+      relations: [
+        'product',
+        'product.category',
+        'product.itemGroup',
+        'product.unit',
+        'distributor',
+        'importOrder',
+        'importOrder.distributor',
+      ],
     });
     if (!batch) {
       throw new NotFoundException(`Batch with ID ${id} not found`);
@@ -141,6 +167,7 @@ export class InventoryService {
     const batch = this.inventoryRepository.create({
       ...createDto,
       currentQuantity: createDto.currentQuantity ?? createDto.importedQuantity,
+      lineTotal: createDto.lineTotal ?? (Number(createDto.costPrice || 0) * createDto.importedQuantity),
     });
     const saved = await this.inventoryRepository.save(batch);
 
@@ -156,6 +183,7 @@ export class InventoryService {
     const batches = createDtos.map(dto => this.inventoryRepository.create({
       ...dto,
       currentQuantity: dto.currentQuantity ?? dto.importedQuantity,
+      lineTotal: dto.lineTotal ?? (Number(dto.costPrice || 0) * dto.importedQuantity),
     }));
     const saved = await this.inventoryRepository.save(batches);
 
@@ -245,14 +273,32 @@ export class InventoryService {
     }
   }
 
-  async getStockHistory(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<any>> {
+  async getStockHistory(
+    branchId?: string,
+    page = 1,
+    limit = 10,
+    productId?: string,
+  ): Promise<PaginatedResult<any>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
-    const whereClause = branchId ? { branchId } : {};
+    if (productId === 'undefined' || productId === 'null' || !productId) {
+      productId = undefined;
+    }
+    const whereClause: any = {};
+    if (branchId) whereClause.branchId = branchId;
+    if (productId) whereClause.productId = productId;
+
     const [data, total] = await this.inventoryLogRepository.findAndCount({
       where: whereClause,
-      relations: ['product', 'createdBy'],
+      relations: [
+        'product',
+        'createdBy',
+        'batch',
+        'batch.distributor',
+        'batch.importOrder',
+        'batch.importOrder.distributor',
+      ],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -719,7 +765,7 @@ export class InventoryService {
     const rows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
 
     const results = { imported: 0, errors: [] as any[] };
-    const importOrdersMap = new Map<string, InventoryImportOrder>();
+    const importOrdersMap = new Map<string, InventoryOrder>();
 
     for (const [index, row] of rows.entries()) {
       try {
@@ -803,7 +849,7 @@ export class InventoryService {
         }
 
         // Handle Import Order (Phiếu nhập kho) creation / linking by invoiceName
-        let importOrder: InventoryImportOrder | null = null;
+        let importOrder: InventoryOrder | null = null;
         if (invoiceName) {
           const mapKey = `${branchId}_${invoiceName.toLowerCase()}`;
           importOrder = importOrdersMap.get(mapKey) || null;
@@ -927,7 +973,7 @@ export class InventoryService {
   // IMPORT ORDERS (PHIếU NHậP KHO)
   // ==========================================
 
-  async findAllImportOrders(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<InventoryImportOrder>> {
+  async findAllImportOrders(branchId?: string, page = 1, limit = 10): Promise<PaginatedResult<InventoryOrder>> {
     if (branchId === 'undefined' || branchId === 'null' || !branchId) {
       branchId = undefined;
     }
@@ -941,9 +987,16 @@ export class InventoryService {
       skip,
       take: limit,
     });
+    const ordersWithBatchTotals = data.map((order) => ({
+      ...order,
+      totalQuantity: (order.batches || []).reduce(
+        (sum, batch) => sum + (Number(batch.importedQuantity) || 0),
+        0,
+      ),
+    }));
 
     return {
-      data,
+      data: ordersWithBatchTotals,
       meta: {
         total,
         page,
@@ -953,7 +1006,7 @@ export class InventoryService {
     };
   }
 
-  async findOneImportOrder(id: string): Promise<InventoryImportOrder> {
+  async findOneImportOrder(id: string): Promise<InventoryOrder> {
     const order = await this.importOrderRepository.findOne({
       where: { id },
       relations: ['distributor', 'createdBy', 'batches', 'batches.product', 'batches.product.unit', 'batches.product.category'],
@@ -964,7 +1017,7 @@ export class InventoryService {
     return order;
   }
 
-  async createImportOrder(dto: CreateImportOrderDto, userId: string): Promise<InventoryImportOrder> {
+  async createImportOrder(dto: CreateImportOrderDto, userId: string): Promise<InventoryOrder> {
     // Generate unique code: NK-YYYYMMDD-XXXX
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const count = await this.importOrderRepository.count();
@@ -996,6 +1049,7 @@ export class InventoryService {
         importedQuantity: item.importedQuantity,
         currentQuantity: item.importedQuantity,
         costPrice: item.costPrice || 0,
+        lineTotal: item.lineTotal ?? (Number(item.costPrice || 0) * item.importedQuantity),
         importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
         expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined,
         invoiceName: dto.invoiceName,
@@ -1027,7 +1081,7 @@ export class InventoryService {
     return this.findOneImportOrder(savedOrder.id);
   }
 
-  async updateImportOrder(id: string, dto: UpdateImportOrderDto): Promise<InventoryImportOrder> {
+  async updateImportOrder(id: string, dto: UpdateImportOrderDto): Promise<InventoryOrder> {
     const order = await this.importOrderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException(`Phểu nhập kho với ID ${id} không tồn tại`);
@@ -1075,7 +1129,7 @@ export class InventoryService {
     const rows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
 
     const results = { imported: 0, errors: [] as any[] };
-    const importOrdersMap = new Map<string, InventoryImportOrder>();
+    const importOrdersMap = new Map<string, InventoryOrder>();
 
     for (const [index, row] of rows.entries()) {
       try {
@@ -1089,16 +1143,32 @@ export class InventoryService {
           continue;
         }
 
-        const { quantity, importPrice, invoiceCode, supplierCode, supplierName, supplierPhone, supplierAddress, personnelName, importDate, totalOrderAmount, productCode, barcode, productName, brand } = parsed;
+        const {
+          quantity, importPrice, lineTotal, unitPrice, discountPercent, discountAmount,
+          invoiceCode, supplierCode, supplierName, supplierPhone, supplierAddress,
+          personnelName, importDate,
+          totalProductAmount, discountOrderAmount, debtAmount, paidAmount, totalQuantity,
+          invoiceNumber, status, note,
+          productCode, barcode, productName, brand, serial, itemNote,
+        } = parsed;
 
-        // ---- Nha cung cap ----
+        // ---- Nha cung cap: tim theo Ma nha cung cap truoc, roi ten/sdt ----
         let distributor: Distributor | null = null;
         if (supplierCode || supplierName || supplierPhone) {
-          const whereClauses: any[] = [];
-          if (supplierCode) whereClauses.push({ code: supplierCode });
-          if (supplierName) whereClauses.push({ name: supplierName });
-          if (supplierPhone) whereClauses.push({ phone: supplierPhone });
-          distributor = (await this.distributorRepository.findOne({ where: whereClauses })) as Distributor | null;
+          // Uu tien: tim theo ma NCC chinh xac
+          if (supplierCode) {
+            distributor = (await this.distributorRepository.findOne({ where: { code: supplierCode } })) as Distributor | null;
+          }
+          // Neu khong tim thay theo ma, tim them theo ten hoac SDT
+          if (!distributor) {
+            const whereClauses: any[] = [];
+            if (supplierName) whereClauses.push({ name: supplierName });
+            if (supplierPhone) whereClauses.push({ phone: supplierPhone });
+            if (whereClauses.length > 0) {
+              distributor = (await this.distributorRepository.findOne({ where: whereClauses })) as Distributor | null;
+            }
+          }
+          // Neu van chua co -> tao moi
           if (!distributor) {
             const newDist = this.distributorRepository.create({
               name: supplierName || supplierCode || 'Nha cung cap moi',
@@ -1138,7 +1208,7 @@ export class InventoryService {
         }
 
         // ---- Phieu nhap kho ----
-        let importOrder: InventoryImportOrder | null = null;
+        let importOrder: InventoryOrder | null = null;
         if (invoiceCode) {
           const mapKey = `${branchId}_${invoiceCode.toLowerCase()}`;
           importOrder = importOrdersMap.get(mapKey) || null;
@@ -1152,16 +1222,33 @@ export class InventoryService {
               if (existingCode) {
                 code = `KV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
               }
+              // Xac dinh trang thai tu cot Trang thai
+              let orderStatus = ImportOrderStatus.COMPLETED;
+              if (status) {
+                const statusLower = status.toLowerCase();
+                if (statusLower.includes('huy') || statusLower.includes('cancel')) {
+                  orderStatus = ImportOrderStatus.CANCELLED;
+                } else if (statusLower.includes('nhap') || statusLower.includes('draft')) {
+                  orderStatus = ImportOrderStatus.DRAFT;
+                }
+              }
               const newOrder = this.importOrderRepository.create({
                 code,
                 invoiceName: invoiceCode,
+                invoiceNumber: invoiceNumber || undefined,
                 branchId,
                 distributorId: distributor?.id || undefined,
                 personnelName: personnelName || undefined,
                 importDate: importDate || new Date(),
                 createdById: userId,
-                totalAmount: totalOrderAmount || 0,
-                status: ImportOrderStatus.COMPLETED,
+                note: note || undefined,
+                totalProductAmount: totalProductAmount || 0,
+                discountAmount: discountOrderAmount || 0,
+                debtAmount: debtAmount || 0,
+                paidAmount: paidAmount || 0,
+                totalQuantity: totalQuantity || 0,
+                totalAmount: totalProductAmount - discountOrderAmount || 0,
+                status: orderStatus,
               });
               importOrder = await this.importOrderRepository.save(newOrder);
             }
@@ -1178,11 +1265,16 @@ export class InventoryService {
           importedQuantity: quantity,
           currentQuantity: quantity,
           costPrice: importPrice,
+          unitPrice: unitPrice || 0,
+          discountPercent: discountPercent || 0,
+          discountAmount: discountAmount || 0,
+          lineTotal: lineTotal || 0,
           importDate,
           invoiceName: invoiceCode || undefined,
           personnelName: personnelName || undefined,
           distributorId: distributor?.id || undefined,
           importOrderId: importOrder?.id || undefined,
+          itemNote: itemNote || undefined,
         };
         const batch = this.inventoryRepository.create(batchData as any);
         const saved = await this.inventoryRepository.save(batch as any);

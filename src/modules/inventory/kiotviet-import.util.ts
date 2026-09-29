@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Parser danh rieng cho file Excel "DanhSachChiTietNhapHang" xuat tu phan mem KiotViet.
  *
  * Cau truc file (hang dau tien la header):
@@ -26,10 +26,20 @@ export interface KiotVietImportParsedRow {
   supplierPhone: string | null;
   supplierAddress: string | null;
   personnelName: string | null;
-  inputInvoice: string | null;
+  /** So hoa don dau vao */
+  invoiceNumber: string | null;
   status: string | null;
   note: string | null;
-  totalOrderAmount: number;
+  /** Tong tien hang */
+  totalProductAmount: number;
+  /** Giam gia phieu nhap */
+  discountOrderAmount: number;
+  /** Can tra NCC */
+  debtAmount: number;
+  /** Tien da tra NCC */
+  paidAmount: number;
+  /** Tong so luong */
+  totalQuantity: number;
 
   // Thong tin san pham
   productCode: string | null;
@@ -37,6 +47,10 @@ export interface KiotVietImportParsedRow {
   productName: string | null;
   brand: string | null;
   unit: string | null;
+  /** Serial/IMEI */
+  serial: string | null;
+  /** Ghi chu hang hoa */
+  itemNote: string | null;
   unitPrice: number;
   discountPercent: number;
   discountAmount: number;
@@ -149,13 +163,34 @@ export function parseKiotVietImportRow(
       `nguoinhap`, `nguoi nhap`, `nhanvien`, `nhan vien`,
       `personnel`, `personnel_name`, `nguoitao`, `nguoi tao`,
     ]) || `KiotViet Import`;
-  const inputInvoice = findValue(row, [
-    `sohoadondauvao`, `so hoa don dau vao`, `inputinvoice`, `sohoadon`,
+
+  // So hoa don dau vao
+  const invoiceNumber = findValue(row, [
+    `sohoadondauvao`, `so hoa don dau vao`, `sohoadon`, `so hoa don`,
+    `inputinvoice`, `invoice_number`, `invoicenumber`,
   ]);
   const status = findValue(row, [`trangthai`, `trang thai`, `status`]);
   const note = findValue(row, [`ghichu`, `ghi chu`, `note`]);
-  const totalOrderAmount = toNumber(
-    findValue(row, [`tongtienhang`, `tong tien hang`, `totalamount`, `tongcong`]),
+
+  // Tong tien hang
+  const totalProductAmount = toNumber(
+    findValue(row, [`tongtienhang`, `tong tien hang`, `totalproductamount`]),
+  );
+  // Giam gia phieu nhap
+  const discountOrderAmount = toNumber(
+    findValue(row, [`giamgiaphieunhap`, `giam gia phieu nhap`, `discountorder`, `giamgiadon`]),
+  );
+  // Can tra NCC
+  const debtAmount = toNumber(
+    findValue(row, [`cantrancc`, `can tra ncc`, `debtamount`, `canthanhtoan`]),
+  );
+  // Tien da tra NCC
+  const paidAmount = toNumber(
+    findValue(row, [`tiendatrancc`, `tien da tra ncc`, `paidamount`, `datrancc`]),
+  );
+  // Tong so luong
+  const totalQuantity = toNumber(
+    findValue(row, [`tongsoluong`, `tong so luong`, `totalquantity`, `tongsomathang`]),
   );
 
   // --- Thong tin san pham ---
@@ -172,8 +207,12 @@ export function parseKiotVietImportRow(
     `thuonghieu`, `thuong hieu`, `brand`, `manufacturer`,
   ]);
   const unit = findValue(row, [`dvt`, `don vi tinh`, `unit`]);
+  const serial = findValue(row, [`serialimei`, `serial`, `imei`, `seriaimei`, `serial/imei`]);
+  const itemNote = findValue(row, [
+    `ghichuhangoa`, `ghi chu hang hoa`, `ghichuhanghoa`, `itemnote`,
+  ]);
   const unitPrice = toNumber(findValue(row, [`dongia`, `don gia`, `unitprice`, `price`]));
-  const discountPercent = toNumber(findValue(row, [`giamgiaphan`, `giam gia %`, `discountpercent`, `discount_percent`]));
+  const discountPercent = toNumber(findValue(row, [`giamgiaphan`, `giam gia %`, `giamgipercent`, `discountpercent`, `discount_percent`]));
   const discountAmount = toNumber(findValue(row, [`giamgia`, `giam gia`, `discountamount`, `discount`]));
   const importPrice = toNumber(findValue(row, [`gianhap`, `gia nhap`, `importprice`, `costprice`, `giavon`]));
   const lineTotal = toNumber(findValue(row, [`thanhtien`, `thanh tien`, `linetotal`, `total`]));
@@ -215,15 +254,21 @@ export function parseKiotVietImportRow(
     supplierPhone,
     supplierAddress,
     personnelName,
-    inputInvoice,
+    invoiceNumber,
     status,
     note,
-    totalOrderAmount,
+    totalProductAmount,
+    discountOrderAmount,
+    debtAmount,
+    paidAmount,
+    totalQuantity,
     productCode: productCode || null,
     barcode: barcode || null,
     productName: productName || null,
     brand: brand || null,
     unit: unit || null,
+    serial: serial || null,
+    itemNote: itemNote || null,
     unitPrice,
     discountPercent,
     discountAmount,

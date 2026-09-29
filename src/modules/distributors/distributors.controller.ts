@@ -14,10 +14,15 @@ export class DistributorsController {
   }
 
   @Get()
-  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('address') address?: string,
+  ) {
     const pageNum = parseInt(page || '1', 10) || 1;
     const limitNum = parseInt(limit || '10', 10) || 10;
-    return this.distributorsService.findAll(pageNum, limitNum);
+    return this.distributorsService.findAll(pageNum, limitNum, search, address);
   }
 
   @Get(':id')

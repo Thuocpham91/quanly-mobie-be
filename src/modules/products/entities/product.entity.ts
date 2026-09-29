@@ -26,6 +26,9 @@ export class Product {
   @Column('simple-array', { nullable: true })
   imageUrls: string[];
 
+  @Column('simple-array', { nullable: true })
+  imeis: string[];
+
   @Column({ nullable: true })
   manufacturer: string;
 
@@ -63,8 +66,8 @@ export class Product {
   @Column({ nullable: true })
   usage: string;
 
-  @OneToMany('InventoryBatch', 'product')
-  batches: any[];
+  @OneToMany(() => InventoryBatch, (batch) => batch.product)
+  batches: InventoryBatch[];
 
   @Column({ default: false })
   isService: boolean;

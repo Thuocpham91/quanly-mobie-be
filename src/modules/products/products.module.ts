@@ -17,7 +17,8 @@ import { ProductPricesController } from './product-prices.controller';
 import { ProductPricesService } from './product-prices.service';
 import { InventoryBatch } from '../inventory/entities/inventory-batch.entity';
 import { InventoryLog } from '../inventory/entities/inventory-log.entity';
-import { InventoryImportOrder } from '../inventory/entities/inventory-import-order.entity';
+import { InventoryOrder } from '../inventory/entities/inventory-order.entity';
+import { Distributor } from '../distributors/entities/distributor.entity';
 
 @Module({
   imports: [
@@ -29,7 +30,8 @@ import { InventoryImportOrder } from '../inventory/entities/inventory-import-ord
       ProductBranchPrice,
       InventoryBatch,
       InventoryLog,
-      InventoryImportOrder,
+      InventoryOrder,
+      Distributor,
     ]),
     forwardRef(() => AuthModule),
     BranchesModule,

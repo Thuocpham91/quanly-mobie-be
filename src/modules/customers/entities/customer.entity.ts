@@ -80,6 +80,9 @@ export class Customer {
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   totalSalesMinusReturns: number;
 
+  @Column({ type: 'timestamp', nullable: true })
+  lastPurchaseDate: Date | null;
+
   @ManyToOne('Branch', 'customers', { nullable: true })
   branch: any; // Using string type for relation to avoid circular dependency issues if not imported
 }

@@ -6,6 +6,7 @@ import {
   Param,
   Query,
   Put,
+  Patch,
   UseGuards,
   Request,
   UseInterceptors,
@@ -13,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/order.dto';
+import { CreateOrderDto, UpdateOrderDto } from './dto/order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { Permissions } from '../auth/permissions.decorator';
@@ -43,8 +44,8 @@ export class OrdersController {
   @Permissions('history.view')
   async findAll(
     @Request() req,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
     @Query('customerId') customerId?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
@@ -63,11 +64,13 @@ export class OrdersController {
       req.user.email?.toLowerCase() === 'admin@gmail.com' ||
       ubr?.role?.name === 'Admin';
     const viewAll = isAdmin || userPerms.includes('history.view_others');
+    const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+    const limitNumber = Math.max(1, parseInt(limit, 10) || 10);
 
     return this.ordersService.findAll(
       branchId,
-      page,
-      limit,
+      pageNumber,
+      limitNumber,
       customerId,
       viewAll ? undefined : userId,
       status,
@@ -75,10 +78,34 @@ export class OrdersController {
     );
   }
 
+  @Get('search')
+  @Permissions('history.view')
+  searchOrders(
+    @Request() req,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('q') query?: string,
+    @Query('customerId') customerId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.findAll(req, page, limit, customerId, status, query);
+  }
+
   @Get(':id')
   findOne(@Request() req, @Param('id') id: string) {
     const branchId = req.headers['x-branch-id'];
     return this.ordersService.findOne(id, branchId);
+  }
+
+  @Patch(':id')
+  @Permissions('sales.create')
+  updateOrder(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() updateOrderDto: UpdateOrderDto,
+  ) {
+    const branchId = req.headers['x-branch-id'];
+    return this.ordersService.updateOrder(id, branchId, updateOrderDto);
   }
 
   @Put(':id/status')

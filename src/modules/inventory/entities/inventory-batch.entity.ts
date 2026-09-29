@@ -2,77 +2,92 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { Product } from '../../products/entities/product.entity';
 import { Branch } from '../../branches/entities/branch.entity';
 import { Distributor } from '../../distributors/entities/distributor.entity';
-import { InventoryImportOrder } from './inventory-import-order.entity';
+import { InventoryOrder } from './inventory-order.entity';
 
 @Entity('inventory_batches')
 export class InventoryBatch {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  productId: string;
+  productId!: string;
 
   @ManyToOne(() => Product, (product) => product.batches, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })
-  product: Product;
+  product!: Product;
 
   @Column()
-  branchId: string;
+  branchId!: string;
 
   @ManyToOne(() => Branch, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'branchId' })
-  branch: Branch;
+  branch!: Branch;
 
   @Column({ nullable: true })
-  distributorId: string;
+  distributorId!: string;
 
   @ManyToOne(() => Distributor, (distributor) => distributor.batches, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'distributorId' })
-  distributor: Distributor;
+  distributor!: Distributor;
 
   @Column({ type: 'int', default: 0 })
-  importedQuantity: number;
+  importedQuantity!: number;
 
   @Column({ type: 'int', default: 0 })
-  currentQuantity: number;
+  currentQuantity!: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  costPrice: number;
+  costPrice!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  unitPrice!: number;
+
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  discountPercent!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  discountAmount!: number;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  lineTotal!: number;
 
   @Column({ nullable: true })
-  importDate: Date;
+  importDate!: Date;
 
   @Column({ nullable: true })
-  expiryDate: Date;
+  expiryDate!: Date;
 
   @Column({ nullable: true })
-  invoiceName: string;
+  invoiceName!: string;
 
   @Column({ type: 'boolean', default: false })
-  isGift: boolean;
+  isGift!: boolean;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  taxAmount: number;
+  taxAmount!: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  discountAmount: number;
-
-  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-  shippingFee: number;
+  shippingFee!: number;
 
   @Column({ nullable: true })
-  personnelName: string;
+  personnelName!: string;
 
   @Column({ nullable: true })
-  importOrderId: string | null;
+  itemNote!: string;
 
-  @ManyToOne(() => InventoryImportOrder, (order) => order.batches, { onDelete: 'SET NULL', nullable: true })
+  @Column('simple-array', { nullable: true })
+  imeis!: string[];
+
+  @Column({ nullable: true })
+  importOrderId!: string | null;
+
+  @ManyToOne(() => InventoryOrder, (order) => order.batches, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'importOrderId' })
-  importOrder: InventoryImportOrder;
+  importOrder!: InventoryOrder;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

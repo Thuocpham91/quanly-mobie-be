@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -6,6 +6,7 @@ import { initializeApp, getApps, cert, ServiceAccount } from 'firebase-admin/app
 import { getMessaging, MulticastMessage } from 'firebase-admin/messaging';
 import { Notification } from './entities/notification.entity';
 import { UserFcmToken } from './entities/user-fcm-token.entity';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -17,6 +18,8 @@ export class NotificationsService implements OnModuleInit {
     private readonly notificationRepo: Repository<Notification>,
     @InjectRepository(UserFcmToken)
     private readonly fcmTokenRepo: Repository<UserFcmToken>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly configService: ConfigService,
   ) {}
 
@@ -92,6 +95,11 @@ export class NotificationsService implements OnModuleInit {
   }
 
   async registerToken(userId: string, token: string, deviceType?: string): Promise<UserFcmToken> {
+    const userExists = await this.userRepo.exist({ where: { id: userId } });
+    if (!userExists) {
+      throw new UnauthorizedException('User no longer exists. Please sign in again.');
+    }
+
     // Delete this token from any other users to avoid duplicate device delivery
     await this.fcmTokenRepo.delete({ token });
 

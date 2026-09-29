@@ -26,23 +26,25 @@ export class InventoryController {
   @Get('history')
   getStockHistory(
     @Query('branchId') branchId?: string,
+    @Query('productId') productId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
   ) {
     const pageNum = parseInt(page as string, 10) || 1;
     const limitNum = parseInt(limit as string, 10) || 10;
-    return this.inventoryService.getStockHistory(branchId, pageNum, limitNum);
+    return this.inventoryService.getStockHistory(branchId, pageNum, limitNum, productId);
   }
 
   @Get('batches')
   findAllBatches(
     @Query('branchId') branchId?: string,
+    @Query('productId') productId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     const pageNum = parseInt(page as string, 10) || 1;
     const limitNum = parseInt(limit as string, 10) || 10;
-    return this.inventoryService.findAllBatches(branchId, pageNum, limitNum);
+    return this.inventoryService.findAllBatches(branchId, pageNum, limitNum, productId);
   }
 
   @Get('batches/:id')

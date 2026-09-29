@@ -43,6 +43,11 @@ export class CreateOrderDto {
   @IsOptional()
   discount?: number;
 
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  paidAmount?: number;
+
   @IsEnum(PaymentMethod)
   @IsOptional()
   paymentMethod?: PaymentMethod;
@@ -76,3 +81,5 @@ export class CreateOrderDto {
   @IsOptional()
   createdAt?: string;
 }
+
+export class UpdateOrderDto extends CreateOrderDto {}

@@ -192,12 +192,24 @@ export class CustomersService {
     const sheet = workbook.Sheets[sheetName];
     const rawData = XLSX.utils.sheet_to_json(sheet);
 
+    const normalizeText = (value: string | null | undefined) => {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ');
+    };
+
     const customersData: Partial<Customer>[] = rawData.map((row: any) => {
       const findValue = (keys: string[]) => {
-        const foundKey = Object.keys(row).find(k => 
-          keys.some(search => k.trim().toLowerCase().includes(search.toLowerCase()))
+        const normalizedKeys = Object.keys(row).map(key => ({ key, normalized: normalizeText(key) }));
+        const found = normalizedKeys.find(({ normalized }) => 
+          keys.some(search => normalized.includes(normalizeText(search)))
         );
-        return foundKey ? String(row[foundKey] || '').trim() : '';
+        return found ? String(row[found.key] || '').trim() : '';
       };
 
       const fullName = findValue(['tên khách hàng', 'tên khá', 'họ tên', 'họ và tên', 'fullname', 'name']);
@@ -222,6 +234,19 @@ export class CustomersService {
       const currentDebtRaw = findValue(['nợ cần thu hiện tại', 'nợ hiện tại', 'nợ', 'currentdebt', 'debt', 'no can thu']);
       const totalSalesMinusReturnsRaw = findValue(['tổng bán trừ trả hàng', 'tổng bán trừ trả', 'tong ban tru tra hang', 'salesminusreturns']);
       const transactionDateRaw = findValue(['ngày giao dịch', 'ngày tạo', 'ngày', 'transactiondate', 'createdat', 'date']);
+      const lastTransactionDateRaw = findValue([
+        'ngày giao dịch cuối',
+        'ngay giao dich cuoi',
+        'ngày gd cuối',
+        'ngay gd cuoi',
+        'giao dịch cuối',
+        'giao dich cuoi',
+        'ngày mua gần nhất',
+        'ngay mua gan nhat',
+        'lastpurchasedate',
+        'last purchase date',
+        'last transaction',
+      ]);
 
       const phone = phoneRaw.replace(/[^0-9]/g, '') || null;
       let notes = notesRaw;
@@ -229,22 +254,79 @@ export class CustomersService {
         notes = `[Mã KH: ${customerCode}]${notes ? ' ' + notes : ''}`;
       }
 
+      const parseDateField = (raw: string): Date | undefined => {
+        if (!raw) return undefined;
+        const trimmed = raw.trim();
+        if (!trimmed) return undefined;
+
+        // Excel serial number: thuần số (vd: 44929, 44880...)
+        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+          const num = parseFloat(trimmed);
+          if (num > 1000 && num < 200000) {
+            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+            const date = new Date(excelEpoch.getTime() + num * 86400000);
+            if (!isNaN(date.getTime())) return date;
+          }
+        }
+
+        const isoYmd = trimmed.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+        if (isoYmd) {
+          const [, y, m, d, hh = '0', mm = '0', ss = '0'] = isoYmd;
+          const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+
+        const ddmmyyyy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:[\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+        if (ddmmyyyy) {
+          const [, d, m, y, hh = '0', mm = '0', ss = '0'] = ddmmyyyy;
+          const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+
+        const parts = trimmed.split(/[\/\-.]/).filter(Boolean);
+        if (parts.length === 3) {
+          const nums = parts.map(part => parseInt(part, 10));
+          const first = nums[0];
+          const second = nums[1];
+          const third = nums[2];
+
+          let year: number | undefined;
+          let month: number | undefined;
+          let day: number | undefined;
+
+          if (first > 31 && second <= 12 && third <= 31) {
+            year = first;
+            month = second;
+            day = third;
+          } else if (third > 31 && first <= 31 && second <= 12) {
+            year = third;
+            month = second;
+            day = first;
+          } else if (first <= 31 && second <= 12 && third <= 9999) {
+            day = first;
+            month = second;
+            year = third;
+          }
+
+          if (year && month && day && year > 1900 && year < 2200) {
+            const date = new Date(year, month - 1, day);
+            if (!isNaN(date.getTime())) return date;
+          }
+        }
+
+        if (!/^\d+$/.test(trimmed)) {
+          const fallback = Date.parse(trimmed);
+          if (!isNaN(fallback)) return new Date(fallback);
+        }
+
+        return undefined;
+      };
+
       let createdAt: Date | undefined;
       if (transactionDateRaw) {
-        const parts = transactionDateRaw.split(/[\/\-.]/);
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            createdAt = date;
-          }
-        } else {
-          const parsed = Date.parse(transactionDateRaw);
-          if (!isNaN(parsed)) {
-            createdAt = new Date(parsed);
-          }
+        const parsed = parseDateField(transactionDateRaw);
+        if (parsed) {
+          createdAt = parsed;
         }
       }
 
@@ -293,22 +375,13 @@ export class CustomersService {
 
       let birthDate: Date | undefined;
       if (birthDateRaw) {
-        const parts = birthDateRaw.split(/[\/\-.]/);
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            birthDate = date;
-          }
-        } else {
-          const parsed = Date.parse(birthDateRaw);
-          if (!isNaN(parsed)) {
-            birthDate = new Date(parsed);
-          }
+        const parsed = parseDateField(birthDateRaw);
+        if (parsed) {
+          birthDate = parsed;
         }
       }
+
+      const lastPurchaseDate = parseDateField(lastTransactionDateRaw) || null;
 
       return {
         fullName,
@@ -333,6 +406,7 @@ export class CustomersService {
         totalSales,
         currentDebt,
         totalSalesMinusReturns,
+        lastPurchaseDate,
         createdAt
       };
     });

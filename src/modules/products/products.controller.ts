@@ -54,6 +54,18 @@ export class ProductsController {
     return this.productsService.findOne(id);
   }
 
+  @Get(':id/batches')
+  @Permissions('products.view')
+  getProductBatches(@Param('id') id: string, @Query('branchId') branchId?: string) {
+    return this.productsService.getProductImportHistory(id, branchId);
+  }
+
+  @Get(':id/import-history')
+  @Permissions('products.view')
+  getProductImportHistory(@Param('id') id: string, @Query('branchId') branchId?: string) {
+    return this.productsService.getProductImportHistory(id, branchId);
+  }
+
   @Patch(':id')
   @Permissions('products.create_edit')
   update(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {

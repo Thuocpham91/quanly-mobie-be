@@ -62,6 +62,9 @@ export class Order {
   discount: number;
 
   @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  paidAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
   totalAmount: number;
 
   @Column('int', { default: 0 })

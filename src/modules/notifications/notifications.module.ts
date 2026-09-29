@@ -4,13 +4,14 @@ import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
 import { Notification } from './entities/notification.entity';
 import { UserFcmToken } from './entities/user-fcm-token.entity';
+import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, UserFcmToken]),
+    TypeOrmModule.forFeature([Notification, UserFcmToken, User]),
     AuthModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

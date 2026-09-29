@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Order, OrderStatus, PaymentMethod } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
-import { CreateOrderDto } from './dto/order.dto';
+import { CreateOrderDto, UpdateOrderDto } from './dto/order.dto';
 import { InventoryService } from '../inventory/inventory.service';
 import { Customer } from '../customers/entities/customer.entity';
 import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
@@ -176,6 +176,7 @@ export class OrdersService {
     }
 
     const discount = createOrderDto.discount || 0;
+    const paidAmount = Number(createOrderDto.paidAmount) || 0;
     const totalAmount = subTotal - discount;
     const walletCreditAmount = Number(createOrderDto.walletCreditAmount) || 0;
 
@@ -221,6 +222,7 @@ export class OrdersService {
       customerId: createOrderDto.customerId,
       subTotal,
       discount,
+      paidAmount,
       totalAmount,
       totalQuantity: createOrderDto.totalQuantity ?? totalQuantity,
       walletCreditAmount,
@@ -714,13 +716,19 @@ export class OrdersService {
 
   async findAll(
     branchId: string,
-    page = 1,
-    limit = 10,
+    page: number | string = 1,
+    limit: number | string = 10,
     customerId?: string,
     createdById?: string,
     status?: string,
     search?: string,
-  ): Promise<{ data: Order[]; total: number }> {
+  ): Promise<{
+    data: Order[];
+    total: number;
+    meta: { total: number; page: number; limit: number; totalPages: number };
+  }> {
+    const pageNumber = Math.max(1, Math.floor(Number(page) || 1));
+    const limitNumber = Math.max(1, Math.floor(Number(limit) || 10));
     const qb = this.ordersRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.customer', 'customer')
@@ -752,11 +760,20 @@ export class OrdersService {
 
     const [data, total] = await qb
       .orderBy('order.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
+      .skip((pageNumber - 1) * limitNumber)
+      .take(limitNumber)
       .getManyAndCount();
 
-    return { data, total };
+    return {
+      data,
+      total,
+      meta: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.max(1, Math.ceil(total / limitNumber)),
+      },
+    };
   }
 
   async importOrdersFromExcel(
@@ -858,14 +875,14 @@ export class OrdersService {
       return null;
     };
 
-    const parseExcelDateValue = (value: unknown): string | null => {
+    const parseExcelDateValue = (value: unknown): Date | null => {
       if (value === undefined || value === null || value === '') {
         return null;
       }
       if (typeof value === 'number') {
         const dateObj = xlsx.SSF.parse_date_code(value);
         if (dateObj && dateObj.y) {
-          const date = new Date(
+          return new Date(
             Date.UTC(
               dateObj.y,
               dateObj.m - 1,
@@ -875,8 +892,8 @@ export class OrdersService {
               dateObj.S || 0,
             ),
           );
-          return date.toLocaleString('vi-VN');
         }
+        return null;
       }
       if (typeof value === 'string') {
         const trimmed = value.trim();
@@ -884,7 +901,7 @@ export class OrdersService {
         if (!Number.isNaN(numeric) && numeric > 20000 && numeric < 60000) {
           const dateObj = xlsx.SSF.parse_date_code(numeric);
           if (dateObj && dateObj.y) {
-            const date = new Date(
+            return new Date(
               Date.UTC(
                 dateObj.y,
                 dateObj.m - 1,
@@ -894,12 +911,27 @@ export class OrdersService {
                 dateObj.S || 0,
               ),
             );
-            return date.toLocaleString('vi-VN');
           }
+          return null;
         }
-        return trimmed;
+        const vietnameseDate = trimmed.match(
+          /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[ T,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+        );
+        if (vietnameseDate) {
+          const [, day, month, year, hour = '0', minute = '0', second = '0'] = vietnameseDate;
+          return new Date(
+            Number(year),
+            Number(month) - 1,
+            Number(day),
+            Number(hour),
+            Number(minute),
+            Number(second),
+          );
+        }
+        const parsedDate = new Date(trimmed);
+        return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
       }
-      return String(value).trim();
+      return null;
     };
 
     const toNumber = (value: unknown) => {
@@ -1068,11 +1100,25 @@ export class OrdersService {
       const discount =
         toNumber(
           findValue(row, [
-            'discount',
-            'chiếtkhấu',
-            'chietkhau',
             'giảm giá',
             'giam gia',
+            'giảm giá đơn hàng',
+            'giảm giá hóa đơn',
+            'chiếtkhấu',
+            'chietkhau',
+            'discount',
+          ]),
+        ) || 0;
+      const paidAmount =
+        toNumber(
+          findValue(row, [
+            'khách đã trả',
+            'khach da tra',
+            'khách hàng đã trả',
+            'tiền khách trả',
+            'tien khach tra',
+            'customer paid',
+            'paid amount',
           ]),
         ) || 0;
 
@@ -1125,6 +1171,7 @@ export class OrdersService {
         status,
         notes,
         discount,
+        paidAmount,
       });
     }
 
@@ -1157,7 +1204,9 @@ export class OrdersService {
 
         const orderNotes = [
           firstRow.notes,
-          firstRow.invoiceTime ? `Thời gian: ${firstRow.invoiceTime}` : null,
+          firstRow.invoiceTime
+            ? `Thời gian: ${firstRow.invoiceTime.toLocaleString('vi-VN')}`
+            : null,
         ]
           .filter(Boolean)
           .join(' | ');
@@ -1188,8 +1237,12 @@ export class OrdersService {
           paymentMethod: firstRow.paymentMethod,
           notes: orderNotes,
           discount: firstRow.discount,
+          paidAmount: firstRow.paidAmount,
           invoiceTotal: firstRow.invoiceTotal,
           items: items.length > 0 ? items : undefined,
+          ...(firstRow.invoiceTime
+            ? { createdAt: firstRow.invoiceTime.toISOString() }
+            : {}),
         };
 
         await this.create(createDto, branchId, userId, true);
@@ -1249,6 +1302,95 @@ export class OrdersService {
     }
 
     return order;
+  }
+
+  async updateOrder(
+    id: string,
+    branchId: string,
+    updateOrderDto: UpdateOrderDto,
+  ): Promise<Order> {
+    const order = await this.findOne(id, branchId);
+    const { items, invoiceTotal, totalQuantity, ...orderFields } = updateOrderDto;
+
+    if (orderFields.orderCode !== undefined) {
+      const orderCode = orderFields.orderCode.trim();
+      if (orderCode && orderCode !== order.orderCode) {
+        const existingOrder = await this.ordersRepository.findOne({
+          where: { orderCode },
+        });
+        if (existingOrder) {
+          throw new BadRequestException(`Mã đơn hàng ${orderCode} đã tồn tại`);
+        }
+      }
+      order.orderCode = orderCode;
+    }
+
+    if (orderFields.customerId !== undefined) order.customerId = orderFields.customerId;
+    if (orderFields.status !== undefined) order.status = orderFields.status;
+    if (orderFields.paymentMethod !== undefined) order.paymentMethod = orderFields.paymentMethod;
+    if (orderFields.notes !== undefined) order.notes = orderFields.notes;
+    if (orderFields.discount !== undefined) order.discount = Number(orderFields.discount) || 0;
+    if (orderFields.paidAmount !== undefined) order.paidAmount = Number(orderFields.paidAmount) || 0;
+    if (orderFields.walletCreditAmount !== undefined) {
+      order.walletCreditAmount = Number(orderFields.walletCreditAmount) || 0;
+    }
+    if (orderFields.createdAt !== undefined) {
+      const createdAt = new Date(orderFields.createdAt);
+      if (Number.isNaN(createdAt.getTime())) {
+        throw new BadRequestException('Ngày hóa đơn không hợp lệ');
+      }
+      order.createdAt = createdAt;
+    }
+
+    if (items !== undefined) {
+      let subTotal = 0;
+      let calculatedQuantity = 0;
+      const orderItems = items.map((item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitPrice = Number(item.unitPrice) || 0;
+        const discountPercent = Number(item.discountPercent) || 0;
+        const discountAmount = Number(item.discountAmount) || 0;
+        const itemSubtotal = quantity * unitPrice;
+        let totalPrice = itemSubtotal;
+        if (discountPercent > 0) {
+          totalPrice = itemSubtotal * (1 - discountPercent / 100);
+        } else if (discountAmount > 0) {
+          totalPrice = Math.max(0, itemSubtotal - discountAmount);
+        }
+        totalPrice = Math.max(0, Math.round(totalPrice * 100) / 100);
+        subTotal += totalPrice;
+        calculatedQuantity += quantity;
+
+        return this.orderItemsRepository.create({
+          orderId: order.id,
+          order,
+          productId: item.productId,
+          quantity,
+          unitPrice,
+          discountPercent,
+          discountAmount,
+          totalPrice,
+        });
+      });
+
+      await this.orderItemsRepository.delete({ orderId: order.id });
+      order.items = orderItems.length
+        ? await this.orderItemsRepository.save(orderItems)
+        : [];
+      order.subTotal = subTotal;
+      order.totalQuantity = totalQuantity ?? calculatedQuantity;
+    } else if (invoiceTotal !== undefined) {
+      order.subTotal = Number(invoiceTotal) || 0;
+      if (totalQuantity !== undefined) {
+        order.totalQuantity = Number(totalQuantity) || 0;
+      }
+    } else if (totalQuantity !== undefined) {
+      order.totalQuantity = Number(totalQuantity) || 0;
+    }
+
+    order.totalAmount = Number(order.subTotal || 0) - Number(order.discount || 0);
+    await this.ordersRepository.save(order);
+    return this.findOne(id, branchId);
   }
 
   async updateStatus(

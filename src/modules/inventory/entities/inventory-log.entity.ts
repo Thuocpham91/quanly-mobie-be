@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, Jo
 import { Product } from '../../products/entities/product.entity';
 import { Branch } from '../../branches/entities/branch.entity';
 import { User } from '../../users/entities/user.entity';
+import { InventoryBatch } from './inventory-batch.entity';
 
 export enum StockMovementType {
   IMPORT = 'IMPORT',
@@ -41,6 +42,10 @@ export class InventoryLog {
 
   @Column({ nullable: true })
   batchId: string;
+
+  @ManyToOne(() => InventoryBatch, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'batchId' })
+  batch: InventoryBatch;
 
   @Column({ nullable: true })
   referenceCode: string; // E.g., order code ORD-XXX, or import receipt code
