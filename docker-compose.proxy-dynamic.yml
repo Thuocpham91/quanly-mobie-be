@@ -8,6 +8,12 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - DEFAULT_TIMEOUT=600s
+      - PROXY_CONNECT_TIMEOUT=600s
+      - PROXY_SEND_TIMEOUT=600s
+      - PROXY_READ_TIMEOUT=600s
+      - CLIENT_MAX_BODY_SIZE=500m
     volumes:
       - conf:/etc/nginx/conf.d
       - vhost:/etc/nginx/vhost.d

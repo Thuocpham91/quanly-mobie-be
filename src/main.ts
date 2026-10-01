@@ -8,6 +8,10 @@ import morgan from 'morgan';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const httpServer = app.getHttpServer();
+
+  httpServer.requestTimeout = 0;
+  httpServer.headersTimeout = 0;
 
   app.use(morgan('dev'));
 

@@ -79,6 +79,24 @@ export class Order {
   @Column({ nullable: true })
   notes: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  pickupAddress: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deliveryTime: Date | null;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0, nullable: true })
+  cashAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0, nullable: true })
+  cardAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0, nullable: true })
+  codAmount: number;
+
+  @Column({ type: 'varchar', nullable: true })
+  deliveryStatus: string | null;
+
   @Column('decimal', { precision: 15, scale: 2, default: 0, nullable: true })
   walletCreditAmount: number;
 

@@ -153,7 +153,7 @@ export class OrdersController {
       req.user.userId,
       {
         createMissingOrders: req.query.createMissingOrders !== 'false',
-        skipStockDeduction: req.query.skipStockDeduction !== 'false',
+        skipStockDeduction: req.query.skipStockDeduction === 'true',
       },
     );
   }

@@ -41,4 +41,10 @@ export class OrderItem {
 
   @Column('decimal', { precision: 14, scale: 2 })
   totalPrice: number;
+
+  @Column('int', { nullable: true })
+  warrantyMonths: number | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  warrantyExpiresAt: Date | null;
 }

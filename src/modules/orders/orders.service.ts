@@ -2,9 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,6 +17,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Product } from '../products/entities/product.entity';
+import { ProductBranchPrice } from '../products/entities/product-branch-price.entity';
 
 @Injectable()
 export class OrdersService {
@@ -32,6 +34,9 @@ export class OrdersService {
     private readonly productsRepository: Repository<Product>,
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
+    @Optional()
+    @InjectRepository(ProductBranchPrice)
+    private readonly productBranchPricesRepository?: Repository<ProductBranchPrice>,
   ) {}
 
   private async findProductByIdentifier(
@@ -75,6 +80,39 @@ export class OrdersService {
         ],
       });
       if (product) return product;
+    }
+
+    return null;
+  }
+
+  private async findProductByCode(identifier: string | null | undefined): Promise<Product | null> {
+    if (!identifier) return null;
+    const code = String(identifier)
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/^['"]|['"]$/g, '')
+      .trim();
+    if (!code) return null;
+    const variants = [...new Set([code, code.replace(/\s+/g, ''), code.toUpperCase(), code.toLowerCase()])];
+    for (const variant of variants) {
+      const product = await this.productsRepository.findOne({
+        where: [{ productCode: variant }, { barcode: variant }],
+        withDeleted: true,
+      });
+      if (product) return product;
+    }
+
+    if (typeof this.productsRepository.createQueryBuilder === 'function') {
+      const queryBuilder = this.productsRepository.createQueryBuilder('product');
+      const canonicalCode = "regexp_replace(lower(coalesce(product.productCode, '')), '[^a-z0-9]', '', 'g')";
+      const canonicalBarcode = "regexp_replace(lower(coalesce(product.barcode, '')), '[^a-z0-9]', '', 'g')";
+      const normalizedInput = "regexp_replace(lower(:productCode), '[^a-z0-9]', '', 'g')";
+      const match = await queryBuilder
+        .withDeleted()
+        .where(`${canonicalCode} = ${normalizedInput}`, { productCode: code })
+        .orWhere(`${canonicalBarcode} = ${normalizedInput}`, { productCode: code })
+        .getOne();
+      if (match) return match;
     }
 
     return null;
@@ -332,6 +370,7 @@ export class OrdersService {
   ): Promise<{
     imported: number;
     errors: any[];
+    message: string;
     errorFile?: string;
     errorFileName?: string;
   }> {
@@ -346,10 +385,13 @@ export class OrdersService {
     const results: {
       imported: number;
       errors: any[];
+      message: string;
       errorFile?: string;
       errorFileName?: string;
-    } = { imported: 0, errors: [] };
+    } = { imported: 0, errors: [], message: '' };
     const orderGroups = new Map<string, any[]>();
+    const orderMetadata = new Map<string, Record<string, any>>();
+    const productCache = new Map<string, Product>();
 
     const normalizeKey = (value: unknown) => {
       if (value === undefined || value === null) return '';
@@ -368,14 +410,13 @@ export class OrdersService {
         normalizedRow[normalizeKey(key)] = row[key];
       }
       for (const candidate of candidates) {
-        const nc = normalizeKey(candidate);
-        if (
-          normalizedRow[nc] !== undefined &&
-          normalizedRow[nc] !== null &&
-          String(normalizedRow[nc]).trim() !== ''
-        ) {
-          return String(normalizedRow[nc]).trim();
+        const exactValue = normalizedRow[normalizeKey(candidate)];
+        if (exactValue !== undefined && exactValue !== null && String(exactValue).trim() !== '') {
+          return String(exactValue).trim();
         }
+      }
+      for (const candidate of candidates) {
+        const nc = normalizeKey(candidate);
         for (const nk of Object.keys(normalizedRow)) {
           if (!nk) continue;
           if (nk.includes(nc) || nc.includes(nk)) {
@@ -388,14 +429,86 @@ export class OrdersService {
       return null;
     };
 
+    const findRawValue = (row: Record<string, unknown>, candidates: string[]) => {
+      const normalizedHeaders = Object.keys(row || {}).map((key) => ({
+        key,
+        normalized: normalizeKey(key),
+      }));
+      for (const candidate of candidates) {
+        const match = normalizedHeaders.find(({ normalized }) => normalized === normalizeKey(candidate));
+        if (match) return row[match.key];
+      }
+      for (const candidate of candidates) {
+        const normalizedCandidate = normalizeKey(candidate);
+        if (normalizedCandidate.length < 5) continue;
+        const match = normalizedHeaders.find(({ normalized }) => normalized.includes(normalizedCandidate));
+        if (match) return row[match.key];
+      }
+      return undefined;
+    };
+
     const toNumber = (value: unknown) => {
       if (value === undefined || value === null) return null;
-      const text = String(value)
-        .replace(/\s+/g, '')
-        .replace(/,/g, '.')
-        .replace(/[^0-9.\-]/g, '');
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      let text = String(value).replace(/\s+/g, '').replace(/[^0-9,.-]/g, '');
+      if (text.includes(',') && text.includes('.')) {
+        if (text.lastIndexOf(',') > text.lastIndexOf('.')) {
+          text = text.replace(/\./g, '').replace(',', '.');
+        } else {
+          text = text.replace(/,/g, '');
+        }
+      } else if (text.includes(',')) {
+        const decimals = text.length - text.lastIndexOf(',') - 1;
+        text = decimals === 3 ? text.replace(/,/g, '') : text.replace(',', '.');
+      } else if ((text.match(/\./g) || []).length > 1) {
+        text = text.replace(/\./g, '');
+      } else if (text.includes('.') && text.length - text.lastIndexOf('.') - 1 === 3) {
+        text = text.replace('.', '');
+      }
       const parsed = parseFloat(text);
       return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const parseImportDate = (value: unknown): Date | null => {
+      if (value === undefined || value === null || value === '') return null;
+      if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+      if (typeof value === 'number' && value > 1) {
+        return new Date(Date.UTC(1899, 11, 30) + value * 86400000);
+      }
+      const text = String(value).trim();
+      if (!text) return null;
+      const yearFirst = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (yearFirst) {
+        const [, year, month, day, hour = '0', minute = '0', second = '0'] = yearFirst;
+        return new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute, +second));
+      }
+      const dayFirst = text.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (dayFirst) {
+        const [, day, month, year, hour = '0', minute = '0', second = '0'] = dayFirst;
+        return new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute, +second));
+      }
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const addMonths = (date: Date, months: number): Date => {
+      const result = new Date(date);
+      const day = result.getUTCDate();
+      result.setUTCDate(1);
+      result.setUTCMonth(result.getUTCMonth() + months);
+      const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+      result.setUTCDate(Math.min(day, lastDay));
+      return result;
+    };
+
+    const parseOrderStatus = (value: string | null): OrderStatus | null => {
+      if (!value) return null;
+      const normalized = normalizeKey(value);
+      if (['completed', 'complete', 'hoanthanh', 'dahoanthanh', 'hoantat'].includes(normalized)) return OrderStatus.COMPLETED;
+      if (['pending', 'dangxuly', 'choxuly'].includes(normalized)) return OrderStatus.PENDING;
+      if (['draft', 'nhap', 'donnhap'].includes(normalized)) return OrderStatus.DRAFT;
+      if (['cancelled', 'canceled', 'dahuy', 'huy'].includes(normalized)) return OrderStatus.CANCELLED;
+      return null;
     };
 
     let lastOrderCode = '';
@@ -463,9 +576,29 @@ export class OrdersService {
       if (!orderCode && lastOrderCode && (productIdentifier || productName)) {
         orderCode = lastOrderCode;
       }
+      if (!orderCode && (productIdentifier || productName) && quantity !== null) {
+        orderCode = `ORD-IMPORT-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+      }
       if (orderCode) {
         lastOrderCode = orderCode;
       }
+
+      const rowMetadata: Record<string, any> = {
+        pickupAddress: findValue(row, ['địa chỉ lấy hàng', 'dia chi lay hang']),
+        deliveryTime: parseImportDate(findRawValue(row, ['thời gian giao', 'thời gian', 'delivery time', 'deliverytime'])),
+        createdAt: parseImportDate(findRawValue(row, ['thời gian tạo', 'ngày tạo', 'created at', 'createdat'])),
+        importedUpdatedAt: parseImportDate(findRawValue(row, ['ngày cập nhật', 'ngày cập nhập', 'updated at', 'updatedat'])),
+        notes: findValue(row, ['ghi chú', 'ghi chu', 'notes', 'note']),
+        subTotal: toNumber(findValue(row, ['tổng tiền hàng', 'tong tien hang', 'subtotal'])),
+        discount: toNumber(findValue(row, ['giảm giá hóa đơn', 'giảm giá hoá đơn', 'giam gia hoa don', 'invoice discount'])),
+        totalAmount: toNumber(findValue(row, ['khách cần trả', 'khach can tra', 'customer payable'])),
+        paidAmount: toNumber(findValue(row, ['khách đã trả', 'khach da tra', 'customer paid'])),
+        cashAmount: toNumber(findValue(row, ['tiền mặt', 'tien mat', 'cash'])),
+        cardAmount: toNumber(findValue(row, ['thẻ', 'the', 'card'])),
+        codAmount: toNumber(findValue(row, ['còn cần thu', 'còn cần thu cod', 'con can thu cod', 'cod'])),
+        status: parseOrderStatus(findValue(row, ['trạng thái', 'trang thai', 'status'])),
+        deliveryStatus: findValue(row, ['trạng thái giao hàng', 'trang thai giao hang', 'delivery status']),
+      };
 
       let unitPrice =
         toNumber(
@@ -521,6 +654,9 @@ export class OrdersService {
       }
 
       const resolvedUnitPrice = unitPrice ?? 0;
+      const warrantyText = findValue(row, ['bảo hành', 'bao hanh', 'warranty']);
+      const warrantyMatch = warrantyText?.match(/(\d+(?:[.,]\d+)?)/);
+      const warrantyMonths = warrantyMatch ? Math.floor(Number(warrantyMatch[1].replace(',', '.'))) : null;
       const discountPercentVal =
         toNumber(
           findValue(row, [
@@ -571,20 +707,79 @@ export class OrdersService {
         unitPrice: resolvedUnitPrice,
         discountPercent,
         discountAmount,
+        warrantyMonths: warrantyMonths && warrantyMonths > 0 ? warrantyMonths : null,
+        metadata: rowMetadata,
         row: index + 2,
       });
+      const existingMetadata = orderMetadata.get(orderCode!) || {};
+      for (const [key, value] of Object.entries(rowMetadata)) {
+        if (value !== null && value !== '') existingMetadata[key] = value;
+      }
+      orderMetadata.set(orderCode!, existingMetadata);
+    }
+
+    const normalizedProductCodes = [
+      ...new Set(
+        [...orderGroups.values()]
+          .flatMap((groupRows) => groupRows.map((row) => normalizeKey(row.productIdentifier)))
+          .filter(Boolean),
+      ),
+    ];
+    if (
+      normalizedProductCodes.length > 0 &&
+      typeof this.productsRepository.createQueryBuilder === 'function'
+    ) {
+      const canonicalCode = "regexp_replace(lower(coalesce(product.productCode, '')), '[^a-z0-9]', '', 'g')";
+      const canonicalBarcode = "regexp_replace(lower(coalesce(product.barcode, '')), '[^a-z0-9]', '', 'g')";
+      const productQueryBuilder = this.productsRepository.createQueryBuilder('product');
+      if (typeof productQueryBuilder.getMany === 'function') {
+        const products = await productQueryBuilder
+          .withDeleted()
+          .where(
+            `${canonicalCode} IN (:...productCodes) OR ${canonicalBarcode} IN (:...productCodes)`,
+            { productCodes: normalizedProductCodes },
+          )
+          .getMany();
+        for (const product of products) {
+          for (const identifier of [product.productCode, product.barcode]) {
+            const normalized = normalizeKey(identifier);
+            if (normalized && normalizedProductCodes.includes(normalized)) {
+              productCache.set(normalized, product);
+            }
+          }
+        }
+      }
     }
 
     const createMissing = options?.createMissingOrders ?? true;
-    const skipStock = options?.skipStockDeduction ?? true;
+    const skipStock = options?.skipStockDeduction ?? false;
+    const orderCodes = [...orderGroups.keys()];
+    const existingOrdersByCode = new Map<string, Order>();
+    if (
+      orderCodes.length > 0 &&
+      typeof this.ordersRepository.createQueryBuilder === 'function'
+    ) {
+      const orderQueryBuilder = this.ordersRepository.createQueryBuilder('order');
+      if (typeof orderQueryBuilder.getMany === 'function') {
+        const existingOrders = await orderQueryBuilder
+          .where('order.orderCode IN (:...orderCodes)', { orderCodes })
+          .getMany();
+        for (const order of existingOrders) {
+          existingOrdersByCode.set(order.orderCode, order);
+        }
+      }
+    }
 
     for (const [orderCode, groupRows] of orderGroups.entries()) {
       try {
         // Find existing order in branch or globally by orderCode
-        let order = await this.ordersRepository.findOne({
-          where: { orderCode, branchId },
-        });
-        if (!order) {
+        let order: Order | null | undefined = existingOrdersByCode.get(orderCode);
+        if (!order && !existingOrdersByCode.size) {
+          order = await this.ordersRepository.findOne({
+            where: { orderCode, branchId },
+          });
+        }
+        if (!order && !existingOrdersByCode.size) {
           order = await this.ordersRepository.findOne({
             where: { orderCode },
           });
@@ -603,6 +798,7 @@ export class OrdersService {
               paymentMethod: PaymentMethod.CASH,
             });
             order = await this.ordersRepository.save(newOrder);
+            existingOrdersByCode.set(orderCode, order);
           } else {
             results.errors.push({
               orderCode,
@@ -613,22 +809,37 @@ export class OrdersService {
           }
         }
 
+        const importedMetadata = orderMetadata.get(orderCode) || {};
+        const importedUpdatedAt = importedMetadata.importedUpdatedAt;
+        const { importedUpdatedAt: _ignoredUpdatedAt, ...orderFields } = importedMetadata;
+        Object.assign(order, orderFields);
+
         // order exists: append items
         let added = 0;
+        const itemsToSave: OrderItem[] = [];
+        const stockDeductions = new Map<string, number>();
         for (const r of groupRows) {
-          const prod = await this.findOrCreateProduct(
-            r.productIdentifier,
-            r.productName,
-            r.unitPrice,
-          );
+          const normalizedCode = normalizeKey(r.productIdentifier);
+          let prod = productCache.get(normalizedCode);
+          if (!prod) {
+            prod =
+              (await this.findProductByCode(r.productIdentifier)) ||
+              (await this.findOrCreateProduct(
+                r.productIdentifier,
+                r.productName,
+                r.unitPrice,
+              )) || undefined;
+            if (prod) productCache.set(normalizedCode, prod);
+          }
           if (!prod) {
             results.errors.push({
               row: r.row,
               orderCode,
-              reason: `Product not found: ${r.productIdentifier || r.productName || 'unknown'}`,
+              reason: `Không thể tạo sản phẩm theo mã hàng: ${r.productIdentifier || 'N/A'}`,
             });
             continue;
           }
+
           const itemSubtotal = Number(r.quantity) * Number(r.unitPrice);
           const discPct = Number(r.discountPercent || 0);
           const discAmt = Number(r.discountAmount || 0);
@@ -649,8 +860,12 @@ export class OrdersService {
             discountPercent: discPct,
             discountAmount: discAmt,
             totalPrice,
+            warrantyMonths: r.warrantyMonths,
+            warrantyExpiresAt: r.warrantyMonths
+              ? addMonths(parseImportDate(order.createdAt) || new Date(), r.warrantyMonths)
+              : null,
           });
-          await this.orderItemsRepository.save(orderItem);
+          itemsToSave.push(orderItem);
           // update order totals
           order.subTotal = Number(order.subTotal || 0) + totalPrice;
           order.totalAmount =
@@ -660,23 +875,69 @@ export class OrdersService {
 
           // deduct stock immediately if order completed and stock deduction allowed
           if (!skipStock && order.status === OrderStatus.COMPLETED) {
-            try {
-              await this.inventoryService.deductStock(
-                prod.id,
-                branchId,
-                r.quantity,
-                order.orderCode,
-                userId,
-              );
-            } catch (err) {
-              // log but continue
-              console.error('Stock deduction failed for imported item', err);
-            }
+            stockDeductions.set(
+              prod.id,
+              (stockDeductions.get(prod.id) || 0) + Number(r.quantity || 0),
+            );
           }
           added += 1;
         }
         if (added > 0) {
+          if (itemsToSave.length) await this.orderItemsRepository.save(itemsToSave);
+
+          if (this.productBranchPricesRepository) {
+            const pricesByProduct = new Map<string, number>();
+            for (const row of groupRows) {
+              const product = productCache.get(normalizeKey(row.productIdentifier));
+              if (product && row.unitPrice !== null && row.unitPrice !== undefined) {
+                pricesByProduct.set(product.id, Number(row.unitPrice));
+              }
+            }
+            const productIds = [...pricesByProduct.keys()];
+            const existingPrices = this.productBranchPricesRepository.find
+              ? await this.productBranchPricesRepository.find({
+                  where: { productId: In(productIds), branchId },
+                })
+              : [];
+            const existingByProduct = new Map(
+              existingPrices.map((price) => [price.productId, price]),
+            );
+            const pricesToSave = productIds.map((productId) => {
+              const existing = existingByProduct.get(productId);
+              if (existing) {
+                existing.price = pricesByProduct.get(productId)!;
+                return existing;
+              }
+              return this.productBranchPricesRepository!.create({
+                productId,
+                branchId,
+                price: pricesByProduct.get(productId)!,
+              });
+            });
+            if (pricesToSave.length) {
+              await this.productBranchPricesRepository.save(pricesToSave);
+            }
+          }
+
+          for (const [productId, quantity] of stockDeductions) {
+            try {
+              await this.inventoryService.deductStock(
+                productId,
+                branchId,
+                quantity,
+                order.orderCode,
+                userId,
+              );
+            } catch (err) {
+              console.error('Stock deduction failed for imported item', err);
+            }
+          }
+
+          Object.assign(order, orderFields);
           await this.ordersRepository.save(order);
+          if (importedUpdatedAt && this.ordersRepository.update) {
+            await this.ordersRepository.update(order.id, { updatedAt: importedUpdatedAt });
+          }
           results.imported += 1;
         }
       } catch (err) {
@@ -710,6 +971,10 @@ export class OrdersService {
         });
       }
     }
+
+    results.message = results.errors.length
+      ? `Import hoàn thành một phần: ${results.imported} đơn hàng, ${results.errors.length} lỗi.`
+      : `Import hoàn thành: ${results.imported} đơn hàng.`;
 
     return results;
   }

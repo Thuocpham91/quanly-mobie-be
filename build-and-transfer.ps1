@@ -113,6 +113,17 @@ if (-not $uploadSuccess) {
 
 Write-Host "✅ Upload completed." -ForegroundColor Green
 
+$ProxyConfig = "nginx/vhost.d/apimobie.chuyendoisovn.com.vn"
+$RemoteProxyConfig = "$ServerPath/apimobie.chuyendoisovn.com.vn"
+Write-Host "`nUploading Nginx upload/timeout configuration..." -ForegroundColor Yellow
+ssh @SshOptions "$ServerUser@$ServerHost" "mkdir -p $ServerPath/nginx"
+scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ProxyConfig "${ServerUser}@${ServerHost}:$RemoteProxyConfig"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to upload Nginx vhost configuration." -ForegroundColor Red
+    exit 1
+}
+Write-Host "✅ Nginx configuration uploaded." -ForegroundColor Green
+
 # Clean up local archives
 Remove-Item -Force $TarFile -ErrorAction SilentlyContinue
 Remove-Item -Force $CompressedTarFile -ErrorAction SilentlyContinue
@@ -144,6 +155,15 @@ if ($LASTEXITCODE -ne 0) {
     $fallbackCmd = "docker rm -f $ContainerName 2>/dev/null; cd $ServerPath && docker compose up -d $ContainerName"
     ssh @SshOptions "$ServerUser@$ServerHost" $fallbackCmd
 }
+
+$proxyConfigCmd = "docker cp $RemoteProxyConfig nginx-proxy:/etc/nginx/vhost.d/apimobie.chuyendoisovn.com.vn && docker restart nginx-proxy && sleep 3 && docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -T 2>&1 | grep -q 'client_max_body_size 100m;'"
+Write-Host "`nApplying Nginx upload/timeout configuration..." -ForegroundColor Yellow
+ssh @SshOptions "$ServerUser@$ServerHost" $proxyConfigCmd
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to apply/verify Nginx vhost configuration." -ForegroundColor Red
+    exit 1
+}
+Write-Host "✅ Nginx config regenerated, validated, and upload limit verified." -ForegroundColor Green
 
 # Kiểm tra trạng thái thực tế của Container
 $checkCmd = "docker ps --filter name=$ContainerName --format '{{.Status}}'"

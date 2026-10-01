@@ -9,10 +9,11 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { Customer } from '../customers/entities/customer.entity';
 import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ProductBranchPrice } from '../products/entities/product-branch-price.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Customer, UserBranchRole, Product]),
+    TypeOrmModule.forFeature([Order, OrderItem, Customer, UserBranchRole, Product, ProductBranchPrice]),
     InventoryModule,
     NotificationsModule,
   ],
