@@ -48,6 +48,13 @@ export class ProductsController {
     return this.productsService.findAll(filterIsService, pageNumber, limitNumber, search);
   }
 
+  @Get('next-code')
+  @Permissions('products.view', 'sales.create')
+  async getNextCode() {
+    const code = await this.productsService.generateNextProductCode();
+    return { code };
+  }
+
   @Get(':id')
   @Permissions('products.view')
   findOne(@Param('id') id: string) {

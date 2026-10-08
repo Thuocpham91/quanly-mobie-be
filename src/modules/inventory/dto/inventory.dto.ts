@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsDateString, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsDateString, IsArray, IsBoolean, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateInventoryBatchDto {
@@ -60,9 +60,17 @@ export class CreateInventoryBatchDto {
   @IsString()
   @IsOptional()
   personnelName?: string;
+
+  @IsString()
+  @IsOptional()
+  itemNote?: string;
 }
 
 export class UpdateInventoryBatchDto {
+  @IsNumber()
+  @IsOptional()
+  importedQuantity?: number;
+
   @IsNumber()
   @IsOptional()
   currentQuantity?: number;
@@ -74,6 +82,38 @@ export class UpdateInventoryBatchDto {
   @IsNumber()
   @IsOptional()
   lineTotal?: number;
+
+  @IsDateString()
+  @IsOptional()
+  importDate?: string;
+
+  @IsDateString()
+  @IsOptional()
+  expiryDate?: string;
+
+  @IsString()
+  @IsOptional()
+  invoiceName?: string;
+
+  @IsString()
+  @IsOptional()
+  distributorId?: string;
+
+  @IsString()
+  @IsOptional()
+  personnelName?: string;
+
+  @IsString()
+  @IsOptional()
+  itemNote?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isGift?: boolean;
+
+  @IsArray()
+  @IsOptional()
+  imeis?: string[];
 }
 
 export class ExportStockDto {
@@ -166,6 +206,14 @@ export class ImportOrderItemDto {
   @IsOptional()
   lineTotal?: number;
 
+  @IsArray()
+  @IsOptional()
+  imeis?: string[];
+
+  @IsString()
+  @IsOptional()
+  itemNote?: string;
+
   @IsDateString()
   @IsOptional()
   expiryDate?: string;
@@ -214,6 +262,10 @@ export class CreateImportOrderDto {
   @IsNumber()
   @IsOptional()
   totalAmount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  paidAmount?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

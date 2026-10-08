@@ -41,12 +41,63 @@ export class DashboardService {
       WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
     `;
 
-    const cogsQuery = `
-      SELECT COALESCE(SUM(ABS(il.quantity) * ib."costPrice"), 0) as "totalCost"
-      FROM orders o
-      INNER JOIN inventory_logs il ON o."orderCode" = il."referenceCode" AND il.type = 'SALE'
-      INNER JOIN inventory_batches ib ON il."batchId"::uuid = ib.id
-      WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
+    const costCte = `
+      WITH completed_orders AS (
+        SELECT o.id, o."orderCode", o."createdAt", o."branchId"
+        FROM orders o
+        WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
+      ), item_quantities AS (
+        SELECT oi."orderId", oi."productId", SUM(oi.quantity) AS quantity
+        FROM order_items oi
+        INNER JOIN completed_orders o ON oi."orderId" = o.id
+        GROUP BY oi."orderId", oi."productId"
+      ), item_costs AS (
+        SELECT
+          o.id AS "orderId",
+          o."createdAt",
+          oi."productId",
+          oi.quantity,
+          COALESCE(sale.quantity, 0) AS "trackedQuantity",
+          COALESCE(sale.cost, 0) AS "trackedCost",
+          MAX(batch_cost.cost) AS "fallbackCost"
+        FROM completed_orders o
+        INNER JOIN item_quantities oi ON oi."orderId" = o.id
+        LEFT JOIN LATERAL (
+          SELECT
+            SUM(ABS(il.quantity)) AS quantity,
+            SUM(ABS(il.quantity) * ib."costPrice") AS cost
+          FROM inventory_logs il
+          INNER JOIN inventory_batches ib ON il."batchId"::uuid = ib.id
+          WHERE il."referenceCode" = o."orderCode"
+            AND il."productId" = oi."productId"
+            AND il.type = 'SALE'
+        ) sale ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(
+            SUM(ib."importedQuantity" * ib."costPrice") / NULLIF(SUM(ib."importedQuantity"), 0),
+            AVG(ib."costPrice"),
+            0
+          ) AS cost
+          FROM inventory_batches ib
+          WHERE ib."productId" = oi."productId"
+            AND ib."branchId" = o."branchId"
+        ) batch_cost ON TRUE
+        GROUP BY o.id, o."createdAt", oi."productId", oi.quantity, sale.quantity, sale.cost
+      ), order_costs AS (
+        SELECT
+          "orderId",
+          "createdAt",
+          SUM(
+            "trackedCost" + GREATEST(quantity - "trackedQuantity", 0) * COALESCE("fallbackCost", 0)
+          ) AS cost
+        FROM item_costs
+        GROUP BY "orderId", "createdAt"
+      )
+    `;
+
+    const cogsQuery = `${costCte}
+      SELECT COALESCE(SUM(cost), 0) AS "totalCost"
+      FROM order_costs
     `;
 
     // --- 2. CHART DATA ---
@@ -57,13 +108,10 @@ export class DashboardService {
       GROUP BY TO_CHAR(o."createdAt", 'YYYY-MM-DD')
     `;
 
-    const costChartQuery = `
-      SELECT TO_CHAR(o."createdAt", 'YYYY-MM-DD') as date, COALESCE(SUM(ABS(il.quantity) * ib."costPrice"), 0) as cost
-      FROM orders o
-      INNER JOIN inventory_logs il ON o."orderCode" = il."referenceCode" AND il.type = 'SALE'
-      INNER JOIN inventory_batches ib ON il."batchId"::uuid = ib.id
-      WHERE o.status = 'COMPLETED' AND o."createdAt" >= $1 AND o."createdAt" <= $2 ${branchCondition}
-      GROUP BY TO_CHAR(o."createdAt", 'YYYY-MM-DD')
+    const costChartQuery = `${costCte}
+      SELECT TO_CHAR("createdAt", 'YYYY-MM-DD') AS date, COALESCE(SUM(cost), 0) AS cost
+      FROM order_costs
+      GROUP BY TO_CHAR("createdAt", 'YYYY-MM-DD')
     `;
 
     // --- 3. CUSTOMERS ---

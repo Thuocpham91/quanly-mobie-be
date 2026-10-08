@@ -111,6 +111,10 @@ export class CreateProductDto {
   @IsBoolean()
   @IsOptional()
   isService?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  hasImei?: boolean;
 }
 
 export class UpdateProductDto extends PartialType(CreateProductDto) {}

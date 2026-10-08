@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as xlsx from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -202,8 +202,91 @@ export class InventoryService {
     if (!batch) {
       throw new NotFoundException(`Batch with ID ${id} not found`);
     }
-    await this.inventoryRepository.update(id, updateDto);
-    return this.inventoryRepository.findOne({ where: { id }, relations: ['product', 'distributor'] }) as Promise<InventoryBatch>;
+
+    const importedQuantity = updateDto.importedQuantity ?? batch.importedQuantity;
+    const quantityDelta = importedQuantity - batch.importedQuantity;
+    const currentQuantity =
+      updateDto.currentQuantity ?? batch.currentQuantity + quantityDelta;
+    if (currentQuantity < 0) {
+      throw new BadRequestException(
+        'Số lượng nhập mới thấp hơn số lượng đã xuất khỏi lô hàng',
+      );
+    }
+
+    const costPrice = updateDto.costPrice ?? Number(batch.costPrice);
+    const isGift = updateDto.isGift ?? batch.isGift;
+    const updatedBatch = await this.inventoryRepository.save({
+      ...batch,
+      ...updateDto,
+      importedQuantity,
+      currentQuantity,
+      costPrice,
+      lineTotal:
+        updateDto.lineTotal ?? (isGift ? 0 : costPrice * importedQuantity),
+      importDate: updateDto.importDate
+        ? new Date(updateDto.importDate)
+        : batch.importDate,
+      expiryDate: updateDto.expiryDate
+        ? new Date(updateDto.expiryDate)
+        : batch.expiryDate,
+    });
+
+    const importLog = await this.inventoryLogRepository.findOne({
+      where: { batchId: id, type: StockMovementType.IMPORT },
+    });
+    if (importLog) {
+      importLog.quantity = importedQuantity;
+      await this.inventoryLogRepository.save(importLog);
+    }
+
+    if (updatedBatch.importOrderId) {
+      const importOrder = await this.importOrderRepository.findOne({
+        where: { id: updatedBatch.importOrderId },
+        relations: ['batches'],
+      });
+      if (importOrder) {
+        if (updateDto.distributorId !== undefined) {
+          importOrder.distributorId = updatedBatch.distributorId;
+        }
+        if (updateDto.invoiceName !== undefined) {
+          importOrder.invoiceName = updatedBatch.invoiceName;
+        }
+        if (updateDto.personnelName !== undefined) {
+          importOrder.personnelName = updatedBatch.personnelName;
+        }
+        if (updateDto.importDate) {
+          importOrder.importDate = updatedBatch.importDate;
+        }
+        importOrder.totalQuantity = importOrder.batches.reduce(
+          (sum, item) => sum + Number(item.importedQuantity || 0),
+          0,
+        );
+        importOrder.totalItemCount = importOrder.batches.length;
+        importOrder.totalProductAmount = importOrder.batches.reduce(
+          (sum, item) =>
+            sum +
+            (item.isGift
+              ? 0
+              : Number(item.lineTotal ?? Number(item.costPrice) * item.importedQuantity)),
+          0,
+        );
+        importOrder.totalAmount =
+          importOrder.totalProductAmount +
+          Number(importOrder.taxAmount || 0) +
+          Number(importOrder.shippingFee || 0) -
+          Number(importOrder.discountAmount || 0);
+        importOrder.debtAmount = Math.max(
+          0,
+          importOrder.totalAmount - Number(importOrder.paidAmount || 0),
+        );
+        await this.importOrderRepository.save(importOrder);
+      }
+    }
+
+    return this.inventoryRepository.findOne({
+      where: { id },
+      relations: ['product', 'distributor'],
+    }) as Promise<InventoryBatch>;
   }
 
   async deleteBatch(id: string): Promise<void> {
@@ -987,13 +1070,9 @@ export class InventoryService {
       skip,
       take: limit,
     });
-    const ordersWithBatchTotals = data.map((order) => ({
-      ...order,
-      totalQuantity: (order.batches || []).reduce(
-        (sum, batch) => sum + (Number(batch.importedQuantity) || 0),
-        0,
-      ),
-    }));
+    const ordersWithBatchTotals = data.map((order) =>
+      this.withCurrentBatchTotals(order),
+    );
 
     return {
       data: ordersWithBatchTotals,
@@ -1014,31 +1093,135 @@ export class InventoryService {
     if (!order) {
       throw new NotFoundException(`Phểu nhập kho với ID ${id} không tồn tại`);
     }
-    return order;
+    return this.withCurrentBatchTotals(order);
+  }
+
+  private withCurrentBatchTotals(order: InventoryOrder): InventoryOrder {
+    const batches = order.batches || [];
+    if (batches.length === 0) return order;
+
+    const totalQuantity = batches.reduce(
+      (sum, batch) => sum + Number(batch.importedQuantity || 0),
+      0,
+    );
+    const totalProductAmount = batches.reduce((sum, batch) => {
+      if (batch.isGift) return sum;
+      const lineTotal = Number(batch.lineTotal || 0);
+      const fallbackLineTotal =
+        Number(batch.costPrice || 0) * Number(batch.importedQuantity || 0);
+      return sum + (lineTotal > 0 ? lineTotal : fallbackLineTotal);
+    }, 0);
+    const totalAmount =
+      totalProductAmount +
+      Number(order.taxAmount || 0) +
+      Number(order.shippingFee || 0) -
+      Number(order.discountAmount || 0);
+
+    return {
+      ...order,
+      totalQuantity,
+      totalItemCount: batches.length,
+      totalProductAmount,
+      totalAmount,
+    };
+  }
+
+  private async createUniqueImportOrderCode(): Promise<string> {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const suffix = Math.floor(1000 + Math.random() * 9000)
+        .toString()
+        .padStart(4, '0');
+      const code = `NK-${dateStr}-${suffix}`;
+      const existing = await this.importOrderRepository.count({ where: { code } });
+      if (existing === 0) {
+        return code;
+      }
+    }
+
+    const fallback = `NK-${dateStr}-${Date.now().toString().slice(-6)}`;
+    const fallbackExists = await this.importOrderRepository.count({ where: { code: fallback } });
+    if (fallbackExists === 0) {
+      return fallback;
+    }
+
+    return `NK-${dateStr}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
   }
 
   async createImportOrder(dto: CreateImportOrderDto, userId: string): Promise<InventoryOrder> {
-    // Generate unique code: NK-YYYYMMDD-XXXX
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const count = await this.importOrderRepository.count();
-    const code = `NK-${dateStr}-${(count + 1).toString().padStart(4, '0')}`;
+    let savedOrder: InventoryOrder | null = null;
+    let lastError: any = null;
 
-    // Create the order header
-    const order = this.importOrderRepository.create({
-      code,
-      branchId: dto.branchId,
-      distributorId: dto.distributorId || undefined,
-      invoiceName: dto.invoiceName,
-      personnelName: dto.personnelName,
-      importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
-      note: dto.note,
-      taxAmount: dto.taxAmount || 0,
-      discountAmount: dto.discountAmount || 0,
-      shippingFee: dto.shippingFee || 0,
-      totalAmount: dto.totalAmount || 0,
-      createdById: userId,
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const code = await this.createUniqueImportOrderCode();
+
+      const order = this.importOrderRepository.create({
+        code,
+        branchId: dto.branchId,
+        distributorId: dto.distributorId || undefined,
+        invoiceName: dto.invoiceName,
+        personnelName: dto.personnelName,
+        importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
+        note: dto.note,
+        taxAmount: dto.taxAmount || 0,
+        discountAmount: dto.discountAmount || 0,
+        shippingFee: dto.shippingFee || 0,
+        totalProductAmount: 0,
+        totalQuantity: 0,
+        totalItemCount: dto.items.length,
+        totalAmount: 0,
+        paidAmount: 0,
+        debtAmount: 0,
+        createdById: userId,
+      });
+
+      try {
+        savedOrder = await this.importOrderRepository.save(order);
+        break;
+      } catch (error) {
+        lastError = error;
+        const pgError = error as { code?: string; driverError?: { code?: string } };
+        const duplicateCode = pgError.code === '23505' || pgError.driverError?.code === '23505';
+        if (!duplicateCode) {
+          throw error;
+        }
+      }
+    }
+
+    if (!savedOrder) {
+      throw lastError || new Error('Failed to create import order');
+    }
+
+    const code = savedOrder.code;
+    const totalProductAmount = dto.items.reduce(
+      (sum, item) =>
+        sum +
+        (item.isGift
+          ? 0
+          : Number(item.lineTotal ?? Number(item.costPrice || 0) * item.importedQuantity)),
+      0,
+    );
+    const totalQuantity = dto.items.reduce(
+      (sum, item) => sum + Number(item.importedQuantity || 0),
+      0,
+    );
+    const totalAmount = Number(dto.totalAmount ?? 0);
+    const paidAmount = Number(dto.paidAmount ?? totalAmount);
+
+    await this.importOrderRepository.update(savedOrder.id, {
+      totalProductAmount,
+      totalQuantity,
+      totalItemCount: dto.items.length,
+      totalAmount,
+      paidAmount,
+      debtAmount: Math.max(0, totalAmount - paidAmount),
     });
-    const savedOrder = await this.importOrderRepository.save(order);
+
+    const updatedOrder = await this.importOrderRepository.findOne({ where: { id: savedOrder.id } });
+    if (!updatedOrder) {
+      throw new NotFoundException(`Phểu nhập kho với ID ${savedOrder.id} không tồn tại sau khi tạo`);
+    }
 
     // Create batches for each item, linked to this order
     for (const item of dto.items) {
@@ -1049,12 +1232,16 @@ export class InventoryService {
         importedQuantity: item.importedQuantity,
         currentQuantity: item.importedQuantity,
         costPrice: item.costPrice || 0,
-        lineTotal: item.lineTotal ?? (Number(item.costPrice || 0) * item.importedQuantity),
+        lineTotal:
+          item.lineTotal ??
+          (item.isGift ? 0 : Number(item.costPrice || 0) * item.importedQuantity),
         importDate: dto.importDate ? new Date(dto.importDate) : new Date(),
         expiryDate: item.expiryDate ? new Date(item.expiryDate) : undefined,
         invoiceName: dto.invoiceName,
         personnelName: dto.personnelName,
+        itemNote: item.itemNote,
         isGift: item.isGift || false,
+        imeis: item.imeis || [],
         importOrderId: savedOrder.id,
       });
       const savedBatch = await this.inventoryRepository.save(batch);

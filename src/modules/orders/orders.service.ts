@@ -987,6 +987,7 @@ export class OrdersService {
     createdById?: string,
     status?: string,
     search?: string,
+    includeItems = false,
   ): Promise<{
     data: Order[];
     total: number;
@@ -998,6 +999,13 @@ export class OrdersService {
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.customer', 'customer')
       .leftJoinAndSelect('order.createdBy', 'createdBy');
+
+    if (includeItems) {
+      qb.leftJoinAndSelect('order.items', 'items').leftJoinAndSelect(
+        'items.product',
+        'itemProduct',
+      );
+    }
 
     if (branchId && branchId !== 'undefined' && branchId !== 'null') {
       qb.andWhere('order.branchId = :branchId', { branchId });

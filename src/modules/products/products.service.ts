@@ -92,6 +92,27 @@ export class ProductsService {
     return product;
   }
 
+  async generateNextProductCode(): Promise<string> {
+    try {
+      const rawResult = await this.productsRepository.query(
+        'SELECT "productCode" FROM products WHERE "productCode" ~ \'^\'\'SP[0-9]+$\'\' ORDER BY length("productCode") DESC, "productCode" DESC LIMIT 1'
+      );
+
+      let nextNumber = 1;
+      if (rawResult && rawResult.length > 0 && rawResult[0].productCode) {
+        const match = String(rawResult[0].productCode).match(/^SP([0-9]+)$/);
+        if (match && match[1]) {
+          nextNumber = parseInt(match[1], 10) + 1;
+        }
+      }
+
+      return 'SP' + String(nextNumber).padStart(6, '0');
+    } catch (e) {
+      const count = await this.productsRepository.count();
+      return 'SP' + String(count + 1).padStart(6, '0');
+    }
+  }
+
   async create(createProductDto: CreateProductDto): Promise<Product> {
     if (createProductDto.imageUrls && createProductDto.imageUrls.length > 0) {
       if (!createProductDto.imageUrl) {
@@ -99,6 +120,14 @@ export class ProductsService {
       }
     } else if (createProductDto.imageUrl) {
       createProductDto.imageUrls = [createProductDto.imageUrl];
+    }
+
+    if (!createProductDto.productCode || !createProductDto.productCode.trim()) {
+      createProductDto.productCode = await this.generateNextProductCode();
+    }
+
+    if (!createProductDto.barcode || !createProductDto.barcode.trim()) {
+      createProductDto.barcode = createProductDto.productCode;
     }
 
     const product = this.productsRepository.create(createProductDto);

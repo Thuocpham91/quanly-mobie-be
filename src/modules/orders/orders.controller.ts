@@ -49,6 +49,7 @@ export class OrdersController {
     @Query('customerId') customerId?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('includeItems') includeItems?: string,
   ) {
     const branchId = req.headers['x-branch-id'];
     const userId = req.user.userId || req.user.id || req.user.sub;
@@ -75,6 +76,7 @@ export class OrdersController {
       viewAll ? undefined : userId,
       status,
       search,
+      includeItems === 'true',
     );
   }
 

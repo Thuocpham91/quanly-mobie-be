@@ -72,6 +72,9 @@ export class Product {
   @Column({ default: false })
   isService: boolean;
 
+  @Column({ default: false })
+  hasImei: boolean;
+
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   basePrice: number;
 

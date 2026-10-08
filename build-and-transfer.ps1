@@ -84,45 +84,89 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "`nUploading $CompressedTarFile to server (Port:$ServerPort) via SCP..." -ForegroundColor Yellow
+Write-Host "`nUploading $CompressedTarFile to server (Port:$ServerPort) via SSH stream fallback..." -ForegroundColor Yellow
 
 $maxRetries = 3
-$retryCount = 0
 $uploadSuccess = $false
+$transferAttempt = 0
+$remoteArchivePath = "$ServerPath/$CompressedTarFile"
+$remoteTarPath = "$ServerPath/$TarFile"
 
-while (-not $uploadSuccess -and $retryCount -lt $maxRetries) {
-    $retryCount++
-    if ($retryCount -gt 1) {
-        Write-Host "⚠️ Thử lại lần $retryCount/$maxRetries sau 3 giây..." -ForegroundColor DarkYellow
+while (-not $uploadSuccess -and $transferAttempt -lt $maxRetries) {
+    $transferAttempt++
+    if ($transferAttempt -gt 1) {
+        Write-Host "⚠️ Thử lại lần $transferAttempt/$maxRetries sau 3 giây..." -ForegroundColor DarkYellow
         Start-Sleep -Seconds 3
     }
 
-    scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=15 $CompressedTarFile "${ServerUser}@${ServerHost}:${ServerPath}/"
+    Write-Host "  [Transfer attempt $transferAttempt/$maxRetries] Using SSH stream upload..." -ForegroundColor Gray
+    $remoteWriteCmd = "mkdir -p '$ServerPath' && cd '$ServerPath' && cat > '$CompressedTarFile' && tar -xzf '$CompressedTarFile' && docker load -i '$TarFile' && rm -f '$CompressedTarFile' '$TarFile'"
+    $sshArguments = "-p $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 $ServerUser@$ServerHost `"$remoteWriteCmd`""
+    $sshInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $sshInfo.FileName = "ssh.exe"
+    $sshInfo.Arguments = $sshArguments
+    $sshInfo.UseShellExecute = $false
+    $sshInfo.RedirectStandardInput = $true
+    $sshInfo.RedirectStandardOutput = $true
+    $sshInfo.RedirectStandardError = $true
+    $sshProcess = New-Object System.Diagnostics.Process
+    $sshProcess.StartInfo = $sshInfo
 
-    if ($LASTEXITCODE -eq 0) {
-        $uploadSuccess = $true
+    try {
+        [void]$sshProcess.Start()
+        $stdoutTask = $sshProcess.StandardOutput.ReadToEndAsync()
+        $stderrTask = $sshProcess.StandardError.ReadToEndAsync()
+        $archiveStream = [System.IO.File]::OpenRead($CompressedTarFile)
+        try {
+            $archiveStream.CopyTo($sshProcess.StandardInput.BaseStream)
+        } finally {
+            $archiveStream.Dispose()
+            $sshProcess.StandardInput.Close()
+        }
+        $sshProcess.WaitForExit()
+        $sshOutput = $stdoutTask.Result
+        $sshError = $stderrTask.Result
+        if ($sshOutput) { Write-Host $sshOutput.Trim() }
+        if ($sshError) { Write-Host $sshError.Trim() -ForegroundColor DarkYellow }
+        $uploadSuccess = $sshProcess.ExitCode -eq 0
+    } catch {
+        Write-Host "  SSH stream transfer error: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    } finally {
+        $sshProcess.Dispose()
+    }
+
+    if (-not $uploadSuccess) {
+        Write-Host "  SSH stream transfer failed; retrying with SCP as fallback..." -ForegroundColor DarkYellow
+        scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=15 $CompressedTarFile "${ServerUser}@${ServerHost}:${ServerPath}/" | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $uploadSuccess = $true
+        }
     }
 }
 
 if (-not $uploadSuccess) {
-    Write-Host "❌ SCP upload failed! Kiểm tra kết nối mạng hoặc SSH Key." -ForegroundColor Red
+    Write-Host "❌ Upload failed on both SSH stream and SCP. Kiểm tra kết nối mạng hoặc SSH Key." -ForegroundColor Red
     Remove-Item -Force $TarFile -ErrorAction SilentlyContinue
     Remove-Item -Force $CompressedTarFile -ErrorAction SilentlyContinue
     exit 1
 }
 
-Write-Host "✅ Upload completed." -ForegroundColor Green
+Write-Host "✅ Image transfer completed." -ForegroundColor Green
 
 $ProxyConfig = "nginx/vhost.d/apimobie.chuyendoisovn.com.vn"
 $RemoteProxyConfig = "$ServerPath/apimobie.chuyendoisovn.com.vn"
-Write-Host "`nUploading Nginx upload/timeout configuration..." -ForegroundColor Yellow
-ssh @SshOptions "$ServerUser@$ServerHost" "mkdir -p $ServerPath/nginx"
-scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ProxyConfig "${ServerUser}@${ServerHost}:$RemoteProxyConfig"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Failed to upload Nginx vhost configuration." -ForegroundColor Red
-    exit 1
+if (Test-Path $ProxyConfig) {
+    Write-Host "`nUploading Nginx upload/timeout configuration..." -ForegroundColor Yellow
+    ssh @SshOptions "$ServerUser@$ServerHost" "mkdir -p $ServerPath/nginx"
+    scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ProxyConfig "${ServerUser}@${ServerHost}:$RemoteProxyConfig"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Failed to upload Nginx vhost configuration." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "✅ Nginx configuration uploaded." -ForegroundColor Green
+} else {
+    Write-Host "⚠️ Nginx vhost configuration not found at '$ProxyConfig'; skipping proxy update." -ForegroundColor DarkYellow
 }
-Write-Host "✅ Nginx configuration uploaded." -ForegroundColor Green
 
 # Clean up local archives
 Remove-Item -Force $TarFile -ErrorAction SilentlyContinue
@@ -133,11 +177,11 @@ Write-Host "🧹 Local archives removed." -ForegroundColor Gray
 # STEP 4: Load Docker image on server
 # ─────────────────────────────────────────────
 Write-Host "`n[4/5] Loading Docker image on server..." -ForegroundColor Yellow
-$loadCmd = "cd $ServerPath && tar -xzf $CompressedTarFile && docker load -i $TarFile && rm -f $CompressedTarFile $TarFile"
+$loadCmd = "cd '$ServerPath' && if [ -f '$CompressedTarFile' ]; then tar -xzf '$CompressedTarFile' && docker load -i '$TarFile' && rm -f '$CompressedTarFile' '$TarFile'; fi && docker image inspect '${ImageName}:${Tag}' >/dev/null"
 ssh @SshOptions "$ServerUser@$ServerHost" $loadCmd
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Failed to load image on server." -ForegroundColor Red
+    Write-Host "❌ Failed to validate image on server." -ForegroundColor Red
     exit 1
 }
 Write-Host "✅ Image loaded on server." -ForegroundColor Green
@@ -156,14 +200,18 @@ if ($LASTEXITCODE -ne 0) {
     ssh @SshOptions "$ServerUser@$ServerHost" $fallbackCmd
 }
 
-$proxyConfigCmd = "docker cp $RemoteProxyConfig nginx-proxy:/etc/nginx/vhost.d/apimobie.chuyendoisovn.com.vn && docker restart nginx-proxy && sleep 3 && docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -T 2>&1 | grep -q 'client_max_body_size 100m;'"
-Write-Host "`nApplying Nginx upload/timeout configuration..." -ForegroundColor Yellow
-ssh @SshOptions "$ServerUser@$ServerHost" $proxyConfigCmd
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Failed to apply/verify Nginx vhost configuration." -ForegroundColor Red
-    exit 1
+if (Test-Path $ProxyConfig) {
+    $proxyConfigCmd = "docker cp $RemoteProxyConfig nginx-proxy:/etc/nginx/vhost.d/apimobie.chuyendoisovn.com.vn && docker restart nginx-proxy && sleep 3 && docker exec nginx-proxy nginx -t && docker exec nginx-proxy nginx -T 2>&1 | grep -q 'client_max_body_size 100m;'"
+    Write-Host "`nApplying Nginx upload/timeout configuration..." -ForegroundColor Yellow
+    ssh @SshOptions "$ServerUser@$ServerHost" $proxyConfigCmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Failed to apply/verify Nginx vhost configuration." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "✅ Nginx config regenerated, validated, and upload limit verified." -ForegroundColor Green
+} else {
+    Write-Host "⚠️ Nginx configuration unchanged; no local vhost file was available." -ForegroundColor DarkYellow
 }
-Write-Host "✅ Nginx config regenerated, validated, and upload limit verified." -ForegroundColor Green
 
 # Kiểm tra trạng thái thực tế của Container
 $checkCmd = "docker ps --filter name=$ContainerName --format '{{.Status}}'"
