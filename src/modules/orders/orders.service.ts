@@ -18,6 +18,8 @@ import { UserBranchRole } from '../branches/entities/user-branch-role.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Product } from '../products/entities/product.entity';
 import { ProductBranchPrice } from '../products/entities/product-branch-price.entity';
+import { InventoryBatch } from '../inventory/entities/inventory-batch.entity';
+import { InventoryLog, StockMovementType } from '../inventory/entities/inventory-log.entity';
 
 @Injectable()
 export class OrdersService {
@@ -83,6 +85,28 @@ export class OrdersService {
     }
 
     return null;
+  }
+
+  private async validateRequiredImeis(
+    items: Array<{ productId: string; quantity: number; imeis?: string[] }>,
+  ): Promise<void> {
+    for (const item of items) {
+      const product = await this.productsRepository.findOne({
+        where: { id: item.productId },
+      });
+      const imeis = item.imeis?.map((imei) => imei.trim());
+      if (
+        product?.hasImei &&
+        (!imeis ||
+          imeis.length !== Number(item.quantity) ||
+          imeis.some((imei) => !imei) ||
+          new Set(imeis).size !== imeis.length)
+      ) {
+        throw new BadRequestException(
+          `Vui lòng chọn đủ IMEI cho sản phẩm ${product.name}`,
+        );
+      }
+    }
   }
 
   private async findProductByCode(identifier: string | null | undefined): Promise<Product | null> {
@@ -203,6 +227,7 @@ export class OrdersService {
           productId: itemDto.productId,
           quantity: itemDto.quantity,
           unitPrice: itemDto.unitPrice,
+          imeis: itemDto.imeis,
           discountPercent,
           discountAmount,
           totalPrice: totalPrice,
@@ -270,12 +295,15 @@ export class OrdersService {
       ...(createOrderDto.createdAt ? { createdAt: new Date(createOrderDto.createdAt) } : {}),
     });
 
+    if (!skipStockDeduction && order.status === OrderStatus.COMPLETED) {
+      await this.validateRequiredImeis(createOrderDto.items || []);
+    }
+
     const savedOrder = await this.ordersRepository.save(order);
 
     if (orderItems.length > 0) {
       for (const item of orderItems) {
         item.orderId = savedOrder.id;
-        item.order = savedOrder;
       }
       savedOrder.items = await this.orderItemsRepository.save(orderItems);
     } else {
@@ -291,6 +319,7 @@ export class OrdersService {
           item.quantity,
           savedOrder.orderCode,
           userId,
+          item.imeis,
         );
       }
     }
@@ -584,6 +613,33 @@ export class OrdersService {
       }
 
       const rowMetadata: Record<string, any> = {
+        customerName: findValue(row, [
+          'customername',
+          'tên khách',
+          'tên khách hàng',
+          'khách hàng',
+          'tenkhach',
+          'tenkhachhang',
+          'customer',
+        ]),
+        customerPhone: findValue(row, [
+          'phone',
+          'phone number',
+          'điện thoại',
+          'số điện thoại',
+          'sđt',
+          'dien thoai',
+          'so dien thoai',
+        ]),
+        customerCode: findValue(row, [
+          'customercode',
+          'mã khách hàng',
+          'mã khách',
+          'mã kh',
+          'ma khach hang',
+          'ma khach',
+          'ma kh',
+        ]),
         pickupAddress: findValue(row, ['địa chỉ lấy hàng', 'dia chi lay hang']),
         deliveryTime: parseImportDate(findRawValue(row, ['thời gian giao', 'thời gian', 'delivery time', 'deliverytime'])),
         createdAt: parseImportDate(findRawValue(row, ['thời gian tạo', 'ngày tạo', 'created at', 'createdat'])),
@@ -772,6 +828,38 @@ export class OrdersService {
 
     for (const [orderCode, groupRows] of orderGroups.entries()) {
       try {
+        const importedMetadata = orderMetadata.get(orderCode) || {};
+        const {
+          importedUpdatedAt,
+          customerName,
+          customerPhone,
+          customerCode,
+          ...orderFields
+        } = importedMetadata;
+        let customerId: string | undefined;
+        if (customerName || customerPhone || customerCode) {
+          const customerConditions: Array<Record<string, string>> = [];
+          if (customerPhone) customerConditions.push({ phone: customerPhone });
+          if (customerCode) customerConditions.push({ code: customerCode });
+          if (customerName) customerConditions.push({ fullName: customerName });
+
+          const existingCustomer = await this.customersRepository.findOne({
+            where: customerConditions,
+          });
+          if (existingCustomer) {
+            customerId = existingCustomer.id;
+          } else {
+            const newCustomer = this.customersRepository.create({
+              fullName: customerName || 'Khách vãng lai',
+              phone: customerPhone || null,
+              code: customerCode || null,
+              branchId,
+            });
+            const savedCustomer = await this.customersRepository.save(newCustomer);
+            customerId = savedCustomer.id;
+          }
+        }
+
         // Find existing order in branch or globally by orderCode
         let order: Order | null | undefined = existingOrdersByCode.get(orderCode);
         if (!order && !existingOrdersByCode.size) {
@@ -791,6 +879,7 @@ export class OrdersService {
               orderCode,
               branchId,
               createdById: userId,
+              customerId,
               subTotal: 0,
               discount: 0,
               totalAmount: 0,
@@ -809,9 +898,7 @@ export class OrdersService {
           }
         }
 
-        const importedMetadata = orderMetadata.get(orderCode) || {};
-        const importedUpdatedAt = importedMetadata.importedUpdatedAt;
-        const { importedUpdatedAt: _ignoredUpdatedAt, ...orderFields } = importedMetadata;
+        if (customerId) order.customerId = customerId;
         Object.assign(order, orderFields);
 
         // order exists: append items
@@ -1640,6 +1727,7 @@ export class OrdersService {
           productId: item.productId,
           quantity,
           unitPrice,
+          imeis: item.imeis,
           discountPercent,
           discountAmount,
           totalPrice,
@@ -1678,6 +1766,7 @@ export class OrdersService {
       status === OrderStatus.COMPLETED &&
       order.status !== OrderStatus.COMPLETED
     ) {
+      await this.validateRequiredImeis(order.items);
       for (const item of order.items) {
         await this.inventoryService.deductStock(
           item.productId,
@@ -1685,6 +1774,7 @@ export class OrdersService {
           item.quantity,
           order.orderCode,
           userId || order.createdById,
+          item.imeis,
         );
       }
     }
@@ -1704,5 +1794,65 @@ export class OrdersService {
     }
     order.createdAt = new Date(createdAt);
     return this.ordersRepository.save(order);
+  }
+
+  async deleteOrder(id: string, branchId: string, userId: string): Promise<void> {
+    if (!branchId) {
+      throw new BadRequestException('Branch ID is required.');
+    }
+
+    await this.ordersRepository.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id, branchId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!order) {
+        throw new NotFoundException(`Order with ID ${id} not found`);
+      }
+
+      const saleLogs = await manager.find(InventoryLog, {
+        where: {
+          referenceCode: order.orderCode,
+          type: StockMovementType.SALE,
+        },
+      });
+
+      for (const saleLog of saleLogs) {
+        const returnedQuantity = Math.abs(Number(saleLog.quantity) || 0);
+        if (returnedQuantity === 0 || !saleLog.batchId) {
+          continue;
+        }
+
+        const batch = await manager.findOne(InventoryBatch, {
+          where: {
+            id: saleLog.batchId,
+            productId: saleLog.productId,
+            branchId: order.branchId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!batch) {
+          continue;
+        }
+
+        batch.currentQuantity = Number(batch.currentQuantity) + returnedQuantity;
+        if (saleLog.imei && !(batch.imeis || []).includes(saleLog.imei)) {
+          batch.imeis = [...(batch.imeis || []), saleLog.imei];
+        }
+        await manager.save(InventoryBatch, batch);
+        await manager.save(InventoryLog, {
+          productId: saleLog.productId,
+          branchId: order.branchId,
+          type: StockMovementType.ADJUST,
+          quantity: returnedQuantity,
+          batchId: batch.id,
+          referenceCode: order.orderCode,
+          note: `Hoàn ${returnedQuantity} sản phẩm do xóa đơn hàng ${order.orderCode}`,
+          createdById: userId,
+        });
+      }
+
+      await manager.remove(Order, order);
+    });
   }
 }

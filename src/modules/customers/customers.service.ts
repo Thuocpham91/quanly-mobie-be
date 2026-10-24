@@ -5,6 +5,7 @@ import { Repository, In, FindOptionsWhere } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import { PaginatedResult } from '../common/interfaces/paginated-result.interface';
 import { UsersService } from '../users/users.service';
+import { Order, OrderStatus } from '../orders/entities/order.entity';
 
 
 @Injectable()
@@ -13,6 +14,8 @@ export class CustomersService {
     @InjectRepository(Customer)
     private customersRepository: Repository<Customer>,
     private usersService: UsersService,
+    @InjectRepository(Order)
+    private ordersRepository: Repository<Order>,
   ) {}
 
   async findAll(branchId?: string, page: number = 1, limit: number = 10): Promise<PaginatedResult<Customer>> {
@@ -27,7 +30,7 @@ export class CustomersService {
     });
     
     return {
-      data,
+      data: await this.attachSalesMetrics(data, branchId),
       meta: {
         total,
         page,
@@ -46,9 +49,7 @@ export class CustomersService {
   }
 
   async create(customerData: Partial<Customer>): Promise<Customer> {
-    if (customerData.phone) {
-      customerData.phone = customerData.phone.replace(/[^0-9]/g, '') || null;
-    }
+    customerData.phone = customerData.phone?.replace(/[^0-9]/g, '') || null;
     if (customerData.phone) {
       const existing = await this.customersRepository.findOne({
         where: { phone: customerData.phone },
@@ -118,7 +119,10 @@ export class CustomersService {
   async search(query: string, branchId?: string, page: number = 1, limit: number = 10): Promise<PaginatedResult<Customer>> {
     const skip = (page - 1) * limit;
     const queryBuilder = this.customersRepository.createQueryBuilder('customer')
-      .where('(customer.fullName ILIKE :query OR customer.phone ILIKE :query)', { query: `%${query}%` });
+      .where(
+        '(customer.fullName ILIKE :query OR customer.phone ILIKE :query OR customer.code ILIKE :query)',
+        { query: `%${query}%` },
+      );
       
     if (branchId) {
       queryBuilder.andWhere('customer.branchId = :branchId', { branchId });
@@ -131,7 +135,7 @@ export class CustomersService {
       .getManyAndCount();
       
     return {
-      data,
+      data: await this.attachSalesMetrics(data, branchId),
       meta: {
         total,
         page,
@@ -139,6 +143,54 @@ export class CustomersService {
         totalPages: Math.ceil(total / limit)
       }
     };
+  }
+
+  private async attachSalesMetrics(customers: Customer[], branchId?: string): Promise<Customer[]> {
+    if (customers.length === 0) {
+      return customers;
+    }
+
+    const customerIds = customers.map((customer) => customer.id);
+    const ordersQuery = this.ordersRepository
+      .createQueryBuilder('order')
+      .select('order.customerId', 'customerId')
+      .addSelect('COALESCE(SUM(order.totalAmount), 0)', 'totalSales')
+      .addSelect(
+        'COALESCE(SUM(GREATEST(order.totalAmount - order.paidAmount, 0)), 0)',
+        'currentDebt',
+      )
+      .where('order.customerId IN (:...customerIds)', { customerIds })
+      .andWhere('order.status = :status', { status: OrderStatus.COMPLETED });
+
+    if (branchId) {
+      ordersQuery.andWhere('order.branchId = :branchId', { branchId });
+    }
+
+    const salesByCustomer = await ordersQuery
+      .groupBy('order.customerId')
+      .getRawMany<{
+        customerId: string;
+        totalSales: string | number;
+        currentDebt: string | number;
+      }>();
+    const metricsByCustomer = new Map(salesByCustomer.map((sales) => [sales.customerId, sales]));
+
+    return customers.map((customer) => {
+      const sales = metricsByCustomer.get(customer.id);
+      const totalSales = sales
+        ? Number(sales.totalSales || 0)
+        : Number(customer.totalSales || 0);
+      const currentDebt = sales
+        ? Number(sales.currentDebt || 0)
+        : Number(customer.currentDebt || 0);
+      const importedNetSales = Number(customer.totalSalesMinusReturns || 0);
+      return {
+        ...customer,
+        totalSales,
+        currentDebt,
+        totalSalesMinusReturns: importedNetSales || totalSales,
+      };
+    });
   }
 
   async topUpWallet(id: string, amount: number): Promise<Customer> {

@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  InternalServerErrorException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import * as XLSX from 'xlsx';
@@ -13,6 +19,18 @@ import { CreateProductDto, UpdateProductDto } from './dto/product.dto';
 import { parseBoolean, parseNumber } from './parse-number.util';
 import { findValue, normalizeHeader } from './excel-row.util';
 
+const isUniqueConstraintViolation = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const databaseError = error as {
+    code?: unknown;
+    driverError?: { code?: unknown };
+  };
+
+  return databaseError.code === '23505' || databaseError.driverError?.code === '23505';
+};
 
 @Injectable()
 export class ProductsService {
@@ -93,24 +111,30 @@ export class ProductsService {
   }
 
   async generateNextProductCode(): Promise<string> {
-    try {
-      const rawResult = await this.productsRepository.query(
-        'SELECT "productCode" FROM products WHERE "productCode" ~ \'^\'\'SP[0-9]+$\'\' ORDER BY length("productCode") DESC, "productCode" DESC LIMIT 1'
-      );
+    return this.generateUniqueProductIdentifier();
+  }
 
-      let nextNumber = 1;
-      if (rawResult && rawResult.length > 0 && rawResult[0].productCode) {
-        const match = String(rawResult[0].productCode).match(/^SP([0-9]+)$/);
-        if (match && match[1]) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
+  private async generateUniqueProductIdentifier(
+    excludedIdentifiers: Set<string> = new Set(),
+  ): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const number = Math.floor(Math.random() * 900000) + 100000;
+      const identifier = `SP-${number}`;
+      if (excludedIdentifiers.has(identifier)) {
+        continue;
       }
 
-      return 'SP' + String(nextNumber).padStart(6, '0');
-    } catch (e) {
-      const count = await this.productsRepository.count();
-      return 'SP' + String(count + 1).padStart(6, '0');
+      const existingProduct = await this.productsRepository.findOne({
+        where: [{ productCode: identifier }, { barcode: identifier }],
+      });
+      if (!existingProduct) {
+        return identifier;
+      }
     }
+
+    throw new InternalServerErrorException(
+      'Không thể tạo mã sản phẩm duy nhất, vui lòng thử lại',
+    );
   }
 
   async create(createProductDto: CreateProductDto): Promise<Product> {
@@ -122,16 +146,47 @@ export class ProductsService {
       createProductDto.imageUrls = [createProductDto.imageUrl];
     }
 
-    if (!createProductDto.productCode || !createProductDto.productCode.trim()) {
-      createProductDto.productCode = await this.generateNextProductCode();
+    const suppliedProductCode = createProductDto.productCode?.trim() || undefined;
+    const suppliedBarcode = createProductDto.barcode?.trim() || undefined;
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const productCode = suppliedProductCode ?? await this.generateUniqueProductIdentifier();
+      const barcode = suppliedBarcode ?? await this.generateUniqueProductIdentifier(new Set([productCode]));
+      const product = this.productsRepository.create({
+        ...createProductDto,
+        productCode,
+        barcode,
+      });
+
+      try {
+        return await this.productsRepository.save(product);
+      } catch (error) {
+        if (!isUniqueConstraintViolation(error)) {
+          throw error;
+        }
+
+        const suppliedIdentifiers: Array<Partial<Pick<Product, 'productCode' | 'barcode'>>> = [];
+        if (suppliedProductCode) suppliedIdentifiers.push({ productCode: suppliedProductCode });
+        if (suppliedBarcode) suppliedIdentifiers.push({ barcode: suppliedBarcode });
+        const suppliedDuplicate = suppliedIdentifiers.length
+          ? await this.productsRepository.findOne({ where: suppliedIdentifiers })
+          : null;
+
+        if (suppliedDuplicate || (suppliedProductCode && suppliedBarcode)) {
+          throw new ConflictException('Mã sản phẩm hoặc mã vạch đã tồn tại');
+        }
+
+        if (attempt === 9) {
+          throw new InternalServerErrorException(
+            'Không thể tạo mã sản phẩm duy nhất, vui lòng thử lại',
+          );
+        }
+      }
     }
 
-    if (!createProductDto.barcode || !createProductDto.barcode.trim()) {
-      createProductDto.barcode = createProductDto.productCode;
-    }
-
-    const product = this.productsRepository.create(createProductDto);
-    return this.productsRepository.save(product);
+    throw new InternalServerErrorException(
+      'Không thể tạo mã sản phẩm duy nhất, vui lòng thử lại',
+    );
   }
 
   async importFromExcel(fileBuffer: Buffer, branchId?: string, userId?: string): Promise<{ success: number; failed: any[] }> {
@@ -420,7 +475,6 @@ export class ProductsService {
           barcode: barcode || undefined,
           imeis: imeis?.length ? imeis : undefined,
           manufacturer: manufacturer || undefined,
-          basePrice: importPrice || 0,
           importPrice: importPrice || 0,
           quantity: quantity || 0,
           note: note || undefined,
@@ -451,7 +505,6 @@ export class ProductsService {
               ? [...new Set([...(existingProduct.imeis || []), ...imeis])]
               : existingProduct.imeis,
             importPrice: importPrice > 0 ? importPrice : existingProduct.importPrice,
-            basePrice: importPrice > 0 ? importPrice : existingProduct.basePrice,
             manufacturer: manufacturer || existingProduct.manufacturer,
             status: status || existingProduct.status,
             note: note || existingProduct.note,
@@ -669,7 +722,14 @@ export class ProductsService {
       });
     }
 
-    return this.productsRepository.save(product);
+    try {
+      return await this.productsRepository.save(product);
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) {
+        throw new ConflictException('Mã sản phẩm hoặc mã vạch đã tồn tại');
+      }
+      throw error;
+    }
   }
 
   async remove(id: string): Promise<void> {

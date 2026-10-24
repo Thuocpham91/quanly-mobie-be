@@ -1,17 +1,23 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import {
+  Injectable,
+  BadRequestException,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
 import { v4 as uuidv4 } from "uuid";
-import { join } from "path";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { basename, extname, join, resolve } from "path";
+import { createReadStream } from "fs";
+import { mkdir, readFile, stat, unlink, writeFile } from "fs/promises";
+import { createHash } from "crypto";
 
 import { UploadFileResponseDto } from "./upload-file.response.dto";
 import { UploadFileResponse, UploadFileListResponse } from "./upload-file.response";
-import { ErrorCode, SuccessCode } from "./message-code.enum";
-import { AzureBlobStorageService } from "../services/azureBlobStorageService";
+import { SuccessCode } from "./message-code.enum";
 import { MulterFile } from "./multer-file.interface";
 
 @Injectable()
 export class FileService {
-  constructor(private readonly storageService: AzureBlobStorageService) {}
+  private readonly uploadDir = resolve(process.cwd(), "uploads", "products");
 
   private readonly CONFIG = {
     MAX_FILE_SIZE: 20 * 1024 * 1024, // 20MB
@@ -69,107 +75,157 @@ export class FileService {
   /* ================= DOWNLOAD ================= */
 
   async getFileStream(key: string) {
-    const stream = await this.storageService.getObjectStream(key);
-    const info = await this.storageService.getBlobInfo(key);
+    const filePath = this.getFilePath(key);
+    const fileStat = await this.getFileStat(filePath, key);
 
     return {
-      stream,
+      stream: createReadStream(filePath),
       meta: {
         fileName: key,
-        mimeType: info.contentType,
-        size: info.size,
+        mimeType: this.getContentType(key),
+        size: fileStat.size,
       },
     };
   }
 
   async getFileInfo(key: string) {
-    const info = await this.storageService.getBlobInfo(key);
-
-    const url = await this.storageService.getPublicUrl(key);
-
-    console.log("Generated signed URL:", {
-      key,
-      size: info.size,
-      contentType: info.contentType,
-      etag: info.etag,
-      lastModified: info.lastModified,
-      metadata: info.metadata,
-      url: url,
-    });
+    const filePath = this.getFilePath(key);
+    const [fileStat, buffer] = await Promise.all([
+      this.getFileStat(filePath, key),
+      this.readFile(filePath, key),
+    ]);
+    const contentType = this.getContentType(key);
 
     return {
       key,
-      size: info.size,
-      contentType: info.contentType,
-      etag: info.etag,
-      lastModified: info.lastModified,
-      metadata: info.metadata,
-      url: url,
+      size: fileStat.size,
+      contentType,
+      etag: this.getEtag(buffer),
+      lastModified: fileStat.mtime,
+      metadata: undefined,
+      url: this.getPublicUrl(key),
     };
   }
 
   async deleteFiles(keys: string[]): Promise<void> {
-    await this.storageService.deleteObjects(keys);
+    if (!keys?.length) {
+      return;
+    }
+
+    await Promise.all(
+      keys.map(async (key) => {
+        const filePath = this.getFilePath(key);
+        try {
+          await unlink(filePath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            throw new InternalServerErrorException(
+              `Failed to delete file ${key}`,
+            );
+          }
+        }
+      }),
+    );
   }
 
   /* ================= INTERNAL ================= */
 
   private async uploadFile(file: MulterFile): Promise<UploadFileResponseDto> {
-    this.validateFileNameAndType(file.originalname, file.mimetype);
+    const originalName = basename(file.originalname);
+    this.validateFileNameAndType(originalName, file.mimetype);
 
     if (file.size > this.CONFIG.MAX_FILE_SIZE) {
       throw new BadRequestException("File size exceeds 20MB limit");
     }
 
-    const uniqueName = this.generateUniqueFileName(file.originalname);
+    const uniqueName = this.generateUniqueFileName(originalName);
 
     try {
-      const { etag } = await this.storageService.uploadBuffer(
-        uniqueName,
-        file.buffer,
-        file.mimetype,
-      );
-
-      const url = await this.storageService.getPublicUrl(uniqueName);
+      await mkdir(this.uploadDir, { recursive: true });
+      await writeFile(this.getFilePath(uniqueName), file.buffer);
 
       return {
         key: uniqueName,
-        etag: etag || "",
+        etag: this.getEtag(file.buffer),
         contentType: file.mimetype,
         size: file.size,
-        url,
+        url: this.getPublicUrl(uniqueName),
       };
-    } catch (azureErr) {
-      // Azure storage fallback: write file to local uploads directory
-      try {
-        const uploadDir = join(process.cwd(), "uploads", "products");
-        if (!existsSync(uploadDir)) {
-          mkdirSync(uploadDir, { recursive: true });
-        }
-        const filePath = join(uploadDir, uniqueName);
-        writeFileSync(filePath, file.buffer);
-        const url = `/uploads/products/${uniqueName}`;
-
-        return {
-          key: uniqueName,
-          etag: "",
-          contentType: file.mimetype,
-          size: file.size,
-          url,
-        };
-      } catch (localErr: any) {
-        throw new BadRequestException(
-          `Upload failed: ${azureErr?.message || localErr?.message}`,
-        );
-      }
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   private generateUniqueFileName(fileName: string): string {
-    const ext = fileName.split(".").pop();
-    const name = fileName.replace(`.${ext}`, "");
+    const ext = extname(fileName);
+    const name = fileName.slice(0, -ext.length);
 
-    return `${name}_${Date.now()}_${uuidv4()}.${ext}`;
+    return `${name}_${Date.now()}_${uuidv4()}${ext}`;
+  }
+
+  private getFilePath(key: string): string {
+    if (!key || basename(key) !== key || key === "." || key === "..") {
+      throw new BadRequestException("Invalid file name");
+    }
+
+    return join(this.uploadDir, key);
+  }
+
+  private getPublicUrl(key: string): string {
+    return `/uploads/products/${encodeURIComponent(key)}`;
+  }
+
+  private getContentType(key: string): string {
+    const contentTypes: Record<string, string> = {
+      ".avif": "image/avif",
+      ".bmp": "image/bmp",
+      ".csv": "text/csv",
+      ".gif": "image/gif",
+      ".heic": "image/heic",
+      ".heif": "image/heif",
+      ".ico": "image/x-icon",
+      ".jfif": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".jpg": "image/jpeg",
+      ".pdf": "application/pdf",
+      ".png": "image/png",
+      ".svg": "image/svg+xml",
+      ".tif": "image/tiff",
+      ".tiff": "image/tiff",
+      ".webp": "image/webp",
+    };
+
+    return contentTypes[extname(key).toLowerCase()] || "application/octet-stream";
+  }
+
+  private getEtag(buffer: Buffer): string {
+    return createHash("sha256").update(buffer).digest("hex");
+  }
+
+  private async getFileStat(filePath: string, key: string) {
+    try {
+      return await stat(filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new NotFoundException(`File ${key} not found`);
+      }
+
+      throw new InternalServerErrorException(`Failed to read file ${key}`);
+    }
+  }
+
+  private async readFile(filePath: string, key: string): Promise<Buffer> {
+    try {
+      return await readFile(filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new NotFoundException(`File ${key} not found`);
+      }
+
+      throw new InternalServerErrorException(`Failed to read file ${key}`);
+    }
   }
 
   private validateFileCount(count: number) {

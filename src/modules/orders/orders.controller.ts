@@ -7,6 +7,7 @@ import {
   Query,
   Put,
   Patch,
+  Delete,
   UseGuards,
   Request,
   UseInterceptors,
@@ -129,6 +130,14 @@ export class OrdersController {
   ) {
     const branchId = req.headers['x-branch-id'];
     return this.ordersService.updateOrderDate(id, branchId, createdAt);
+  }
+
+  @Delete(':id')
+  @Permissions('history.cancel_order')
+  deleteOrder(@Request() req, @Param('id') id: string): Promise<void> {
+    const branchId = req.headers['x-branch-id'];
+    const userId = req.user.userId || req.user.id || req.user.sub;
+    return this.ordersService.deleteOrder(id, branchId, userId);
   }
 
   @Post('import')

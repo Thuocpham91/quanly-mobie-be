@@ -43,6 +43,8 @@ services:
     ports:
       - '${PORT}:${PORT}'
     restart: always
+    volumes:
+      - ./uploads:/app/uploads
     environment:
       ENVIRONMENT: ${ENVIRONMENT}
       PORT: ${PORT}

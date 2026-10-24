@@ -15,6 +15,11 @@ export class OrderItemDto {
   @Type(() => Number)
   unitPrice: number;
 
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  imeis?: string[];
+
   @IsNumber()
   @IsOptional()
   @Type(() => Number)

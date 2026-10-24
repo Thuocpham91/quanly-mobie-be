@@ -163,6 +163,25 @@ export class InventoryService {
     return summary;
   }
 
+  async getAvailableImeis(productId: string, branchId: string): Promise<string[]> {
+    if (!branchId) {
+      throw new BadRequestException('Branch ID is required.');
+    }
+
+    const batches = await this.inventoryRepository.find({
+      where: { productId, branchId, currentQuantity: MoreThan(0) },
+      order: { expiryDate: 'ASC', createdAt: 'ASC' },
+    });
+
+    return [
+      ...new Set(
+        batches.flatMap((batch) =>
+          (batch.imeis || []).slice(0, Number(batch.currentQuantity)),
+        ),
+      ),
+    ];
+  }
+
   async createBatch(createDto: CreateInventoryBatchDto): Promise<InventoryBatch> {
     const batch = this.inventoryRepository.create({
       ...createDto,
@@ -171,9 +190,9 @@ export class InventoryService {
     });
     const saved = await this.inventoryRepository.save(batch);
 
-    // Cập nhật giá nhập (basePrice) của sản phẩm theo giá nhập mới nhất
+    // Keep the latest import cost separate from the default selling price.
     if (createDto.costPrice != null && createDto.costPrice > 0) {
-      await this.productsRepository.update(createDto.productId, { basePrice: createDto.costPrice });
+      await this.productsRepository.update(createDto.productId, { importPrice: createDto.costPrice });
     }
 
     return saved;
@@ -187,10 +206,10 @@ export class InventoryService {
     }));
     const saved = await this.inventoryRepository.save(batches);
 
-    // Cập nhật giá nhập (basePrice) của từng sản phẩm theo giá nhập mới nhất
+    // Keep import cost separate from the default selling price.
     for (const dto of createDtos) {
       if (dto.costPrice != null && dto.costPrice > 0) {
-        await this.productsRepository.update(dto.productId, { basePrice: dto.costPrice });
+        await this.productsRepository.update(dto.productId, { importPrice: dto.costPrice });
       }
     }
 
@@ -303,8 +322,95 @@ export class InventoryService {
     quantity: number,
     referenceCode: string,
     userId: string,
+    imeis?: string[],
   ): Promise<void> {
     if (quantity <= 0) return;
+
+    if (imeis?.length) {
+      const selectedImeis = imeis.map((imei) => imei.trim());
+      if (
+        selectedImeis.length !== quantity ||
+        selectedImeis.some((imei) => !imei) ||
+        new Set(selectedImeis).size !== selectedImeis.length
+      ) {
+        throw new BadRequestException(
+          `Select exactly ${quantity} unique IMEI(s) for this product.`,
+        );
+      }
+
+      await this.inventoryRepository.manager.transaction(async (manager) => {
+        const batches = await manager.find(InventoryBatch, {
+          where: {
+            productId,
+            branchId,
+            currentQuantity: MoreThan(0),
+          },
+          order: {
+            expiryDate: 'ASC',
+            createdAt: 'ASC',
+          },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        const imeiToBatch = new Map<string, InventoryBatch>();
+        for (const batch of batches) {
+          for (const imei of batch.imeis || []) {
+            if (!imeiToBatch.has(imei)) {
+              imeiToBatch.set(imei, batch);
+            }
+          }
+        }
+
+        const selectedBatches = selectedImeis.map((imei) => {
+          const batch = imeiToBatch.get(imei);
+          if (!batch) {
+            throw new BadRequestException(
+              `IMEI ${imei} is no longer available in this branch.`,
+            );
+          }
+          return { imei, batch };
+        });
+        const quantitiesByBatch = new Map<string, number>();
+        for (const { batch } of selectedBatches) {
+          quantitiesByBatch.set(
+            batch.id,
+            (quantitiesByBatch.get(batch.id) || 0) + 1,
+          );
+        }
+        for (const batch of batches) {
+          if (
+            (quantitiesByBatch.get(batch.id) || 0) >
+            Number(batch.currentQuantity)
+          ) {
+            throw new BadRequestException(
+              `Not enough stock for selected IMEIs in batch ${batch.id}.`,
+            );
+          }
+        }
+
+        for (const { imei, batch } of selectedBatches) {
+          batch.imeis = (batch.imeis || []).filter(
+            (available) => available !== imei,
+          );
+          batch.currentQuantity = Number(batch.currentQuantity) - 1;
+          await manager.save(InventoryBatch, batch);
+
+          const log = this.inventoryLogRepository.create({
+            productId,
+            branchId,
+            type: StockMovementType.SALE,
+            quantity: -1,
+            batchId: batch.id,
+            referenceCode,
+            note: `Bán IMEI ${imei} qua đơn hàng ${referenceCode}`,
+            createdById: userId,
+            imei,
+          });
+          await manager.save(InventoryLog, log);
+        }
+      });
+      return;
+    }
 
     const batches = await this.inventoryRepository.find({
       where: {
@@ -916,7 +1022,7 @@ export class InventoryService {
               name: productName || String(productIdentifier),
               productCode: productIdentifier,
               barcode: productIdentifier,
-              basePrice: costPrice > 0 ? costPrice : 0,
+              importPrice: costPrice > 0 ? costPrice : 0,
             };
             const newProduct = this.productsRepository.create(createData as any);
             finalProduct = await this.productsRepository.save(newProduct as any);
@@ -926,9 +1032,9 @@ export class InventoryService {
           }
         }
 
-        // Update product basePrice if costPrice > 0
+        // Keep the latest import cost separate from the default selling price.
         if (costPrice > 0 && finalProduct) {
-          await this.productsRepository.update(finalProduct.id, { basePrice: costPrice });
+          await this.productsRepository.update(finalProduct.id, { importPrice: costPrice });
         }
 
         // Handle Import Order (Phiếu nhập kho) creation / linking by invoiceName
@@ -1246,9 +1352,9 @@ export class InventoryService {
       });
       const savedBatch = await this.inventoryRepository.save(batch);
 
-      // Update product basePrice
+      // Keep the latest import cost separate from the default selling price.
       if (item.costPrice && item.costPrice > 0) {
-        await this.productsRepository.update(item.productId, { basePrice: item.costPrice });
+        await this.productsRepository.update(item.productId, { importPrice: item.costPrice });
       }
 
       // Log the import
@@ -1381,7 +1487,7 @@ export class InventoryService {
               productCode: productCode || undefined,
               barcode: barcode || undefined,
               manufacturer: brand || undefined,
-              basePrice: importPrice > 0 ? importPrice : 0,
+              importPrice: importPrice > 0 ? importPrice : 0,
             } as any);
             product = await this.productsRepository.save(newProduct as any);
           } catch {
@@ -1391,7 +1497,7 @@ export class InventoryService {
         }
 
         if (importPrice > 0 && product) {
-          await this.productsRepository.update(product.id, { basePrice: importPrice });
+          await this.productsRepository.update(product.id, { importPrice });
         }
 
         // ---- Phieu nhap kho ----

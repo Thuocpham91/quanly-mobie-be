@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConflictException } from '@nestjs/common';
 import * as xlsx from 'xlsx';
 import { ProductsService } from './products.service';
 import { Product } from './entities/product.entity';
@@ -14,6 +15,7 @@ describe('ProductsService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
   };
   let inventoryRepository: {
     create: jest.Mock;
@@ -41,6 +43,7 @@ describe('ProductsService', () => {
       findOne: jest.fn(),
       create: jest.fn((dto) => dto),
       save: jest.fn(async (dto) => dto),
+      update: jest.fn(async () => undefined),
     };
     inventoryRepository = {
       create: jest.fn((dto) => dto),
@@ -92,6 +95,61 @@ describe('ProductsService', () => {
     service = module.get<ProductsService>(ProductsService);
   });
 
+  it('preserves product codes and barcodes supplied by the frontend', async () => {
+    const product = {
+      name: 'Sản phẩm A',
+      productCode: 'SP-FE-001',
+      barcode: 'SP-FE-002',
+    };
+
+    await service.create(product);
+
+    expect(repository.create).toHaveBeenCalledWith(product);
+    expect(repository.findOne).not.toHaveBeenCalled();
+  });
+
+  it('generates SP-number identifiers when the frontend omits them', async () => {
+    const product = { name: 'Sản phẩm A' };
+    repository.findOne.mockResolvedValue(null);
+
+    await service.create(product);
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productCode: expect.stringMatching(/^SP-\d{6}$/),
+        barcode: expect.stringMatching(/^SP-\d{6}$/),
+      }),
+    );
+    const savedProduct = repository.create.mock.calls[0][0];
+    expect(savedProduct.productCode).not.toBe(savedProduct.barcode);
+  });
+
+  it('retries generated identifiers when a concurrent create violates a unique constraint', async () => {
+    repository.findOne.mockResolvedValue(null);
+    repository.save.mockImplementationOnce(async () => {
+      throw { code: '23505' };
+    });
+
+    await service.create({ name: 'Sản phẩm A' });
+
+    expect(repository.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a conflict when a supplied product code or barcode already exists', async () => {
+    repository.save.mockImplementationOnce(async () => {
+      throw { code: '23505' };
+    });
+    repository.findOne.mockResolvedValue({ id: 'existing-product' });
+
+    await expect(
+      service.create({
+        name: 'Sản phẩm A',
+        productCode: 'SP-0001',
+        barcode: '893000000001',
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it('imports products from an Excel file', async () => {
     const workbook = xlsx.utils.book_new();
     const sheet = xlsx.utils.aoa_to_sheet([
@@ -115,10 +173,36 @@ describe('ProductsService', () => {
         productCode: 'SP-001',
         barcode: '8938500001',
         manufacturer: 'Vinamilk',
-        basePrice: 25000,
+        importPrice: 25000,
         isService: false,
       }),
     );
+    expect(repository.create.mock.calls[0][0]).not.toHaveProperty('basePrice');
+  });
+
+  it('updates import cost without overwriting an existing selling price', async () => {
+    const workbook = xlsx.utils.book_new();
+    const sheet = xlsx.utils.aoa_to_sheet([
+      ['Tên sản phẩm', 'Mã sản phẩm', 'Giá nhập', 'Số lượng'],
+      ['Sữa tươi', 'SP-001', '25000', '1'],
+    ]);
+    xlsx.utils.book_append_sheet(workbook, sheet, 'Sheet1');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    repository.findOne.mockResolvedValue({
+      id: 'product-1',
+      basePrice: 45000,
+      importPrice: 20000,
+      quantity: 0,
+    });
+
+    const result = await service.importFromExcel(buffer as Buffer, 'branch-1');
+
+    expect(result).toEqual({ success: 1, failed: [] });
+    expect(repository.update).toHaveBeenCalledWith(
+      'product-1',
+      expect.objectContaining({ importPrice: 25000 }),
+    );
+    expect(repository.update.mock.calls[0][1]).not.toHaveProperty('basePrice');
   });
 
   it('groups imported products into an InventoryImportOrder using the source import code', async () => {
@@ -326,7 +410,7 @@ describe('ProductsService', () => {
         productCode: 'LT-100',
         barcode: '123456789',
         manufacturer: 'Dell',
-        basePrice: 27800,
+        importPrice: 27800,
         isService: true,
       }),
     );

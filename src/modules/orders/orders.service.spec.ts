@@ -3,6 +3,59 @@ import { OrdersService } from './orders.service';
 import { OrderStatus } from './entities/order.entity';
 
 describe('OrdersService', () => {
+  it('creates an order response without circular item-to-order references', async () => {
+    const savedItems: any[] = [];
+    const queryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    const ordersRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+      create: jest.fn((order) => order),
+      save: jest.fn(async (order) => ({ ...order, id: 'order-1' })),
+    };
+    const orderItemsRepository = {
+      create: jest.fn((item) => item),
+      save: jest.fn(async (items) => {
+        savedItems.push(...items);
+        return items;
+      }),
+    };
+    const service = new OrdersService(
+      ordersRepository as any,
+      orderItemsRepository as any,
+      {} as any,
+      {
+        findOne: jest.fn().mockResolvedValue({ role: { name: 'Admin' } }),
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const order = await service.create(
+      {
+        status: OrderStatus.DRAFT,
+        items: [
+          {
+            productId: 'product-1',
+            quantity: 1,
+            unitPrice: 100,
+          },
+        ],
+      } as any,
+      'branch-1',
+      'user-1',
+    );
+
+    expect(() => JSON.stringify(order)).not.toThrow();
+    expect(savedItems[0]).toEqual(
+      expect.objectContaining({ orderId: 'order-1' }),
+    );
+    expect(savedItems[0].order).toBeUndefined();
+  });
+
   it('updates order fields, replaces items, and recalculates order totals', async () => {
     const existingOrder = {
       id: 'order-1',
@@ -64,6 +117,67 @@ describe('OrdersService', () => {
         totalQuantity: 2,
       }),
     );
+  });
+
+  it('restores stock from sale logs and deletes the order in one transaction', async () => {
+    const order = {
+      id: 'order-1',
+      orderCode: 'ORD-001',
+      branchId: 'branch-1',
+    };
+    const batch = {
+      id: 'batch-1',
+      productId: 'product-1',
+      branchId: 'branch-1',
+      currentQuantity: 4,
+    };
+    const saleLog = {
+      productId: 'product-1',
+      branchId: 'branch-1',
+      quantity: -2,
+      batchId: 'batch-1',
+    };
+    const manager = {
+      findOne: jest.fn()
+        .mockResolvedValueOnce(order)
+        .mockResolvedValueOnce(batch),
+      find: jest.fn().mockResolvedValue([saleLog]),
+      save: jest.fn(async (_entity, value) => value),
+      remove: jest.fn().mockResolvedValue(order),
+    };
+    const ordersRepository = {
+      manager: {
+        transaction: jest.fn((callback) => callback(manager)),
+      },
+    };
+    const service = new OrdersService(
+      ordersRepository as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.deleteOrder('order-1', 'branch-1', 'user-1');
+
+    expect(batch.currentQuantity).toBe(6);
+    expect(manager.save).toHaveBeenNthCalledWith(1, expect.any(Function), batch);
+    expect(manager.save).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Function),
+      expect.objectContaining({
+        productId: 'product-1',
+        branchId: 'branch-1',
+        type: 'ADJUST',
+        quantity: 2,
+        batchId: 'batch-1',
+        referenceCode: 'ORD-001',
+        createdById: 'user-1',
+      }),
+    );
+    expect(manager.remove).toHaveBeenCalledWith(expect.any(Function), order);
   });
 
   it('returns order pagination metadata and applies page and limit to the query', async () => {
@@ -412,6 +526,72 @@ describe('OrdersService', () => {
         expect.objectContaining({ orderId: 'generated-order-id', productId: 'product-1', quantity: 1 }),
       ]),
     );
+  });
+
+  it('creates a missing invoice and links the customer and purchased product', async () => {
+    const customer = { id: 'customer-1' };
+    const ordersRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((order) => order),
+      save: jest.fn(async (order) => ({ ...order, id: 'generated-order-id' })),
+    };
+    const orderItemsRepository = {
+      create: jest.fn((item) => item),
+      save: jest.fn(async (items) => items),
+    };
+    const customersRepository = {
+      findOne: jest.fn().mockResolvedValue(customer),
+      create: jest.fn((data) => data),
+      save: jest.fn(async (data) => ({ ...data, id: 'new-customer-id' })),
+    };
+    const productsRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'product-1' }),
+    };
+    const service = new OrdersService(
+      ordersRepository as any,
+      orderItemsRepository as any,
+      customersRepository as any,
+      {} as any,
+      productsRepository as any,
+      { deductStock: jest.fn() } as any,
+      {} as any,
+    );
+    const workbook = xlsx.utils.book_new();
+    const sheet = xlsx.utils.aoa_to_sheet([
+      ['Mã hóa đơn', 'Tên khách hàng', 'Số điện thoại', 'Mã hàng', 'Số lượng', 'Giá bán'],
+      ['INV-001', 'Nguyễn Văn A', '0900000001', 'SKU-1', 2, 25000],
+    ]);
+    xlsx.utils.book_append_sheet(workbook, sheet, 'Sheet1');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    const result = await service.importOrderDetailsFromExcel(
+      buffer,
+      'branch-1',
+      'user-1',
+      { skipStockDeduction: true },
+    );
+
+    expect(result.imported).toBe(1);
+    expect(result.errors).toEqual([]);
+    expect(customersRepository.findOne).toHaveBeenCalledWith({
+      where: [
+        { phone: '0900000001' },
+        { fullName: 'Nguyễn Văn A' },
+      ],
+    });
+    expect(ordersRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderCode: 'INV-001',
+        customerId: 'customer-1',
+      }),
+    );
+    expect(orderItemsRepository.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        orderId: 'generated-order-id',
+        productId: 'product-1',
+        quantity: 2,
+      }),
+    ]);
   });
 
   it('matches product codes despite separators and case differences', async () => {

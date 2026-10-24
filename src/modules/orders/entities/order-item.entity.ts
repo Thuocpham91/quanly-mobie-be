@@ -30,6 +30,9 @@ export class OrderItem {
   @Column('int')
   quantity: number;
 
+  @Column('simple-array', { nullable: true })
+  imeis: string[];
+
   @Column('decimal', { precision: 14, scale: 2 })
   unitPrice: number;
 

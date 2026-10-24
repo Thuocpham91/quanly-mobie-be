@@ -54,6 +54,9 @@ export class InventoryLog {
   note: string;
 
   @Column({ nullable: true })
+  imei: string;
+
+  @Column({ nullable: true })
   createdById: string;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL' })

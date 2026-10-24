@@ -22,8 +22,7 @@ Write-Host "==================================================" -ForegroundColor
 # Cấu hình SSH chung chống đơ/treo kết nối
 $SshOptions = @(
     "-p", $ServerPort,
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "StrictHostKeyChecking=yes",
     "-o", "ConnectTimeout=10",
     "-o", "ServerAliveInterval=15",
     "-o", "ServerAliveCountMax=3"
@@ -68,8 +67,8 @@ if (-not (Test-Path $TarFile)) {
 Write-Host "✅ Image exported to $TarFile" -ForegroundColor Green
 
 Write-Host "`nCompressing archive for stable transfer..." -ForegroundColor Gray
-tar -czf $CompressedTarFile -C (Get-Location)$TarFile
-if (-not (Test-Path $CompressedTarFile)) {
+tar -czf $CompressedTarFile $TarFile
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $CompressedTarFile)) {
     Write-Host "❌ Failed to compress image archive" -ForegroundColor Red
     exit 1
 }
@@ -137,7 +136,7 @@ while (-not $uploadSuccess -and $transferAttempt -lt $maxRetries) {
 
     if (-not $uploadSuccess) {
         Write-Host "  SSH stream transfer failed; retrying with SCP as fallback..." -ForegroundColor DarkYellow
-        scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o ServerAliveInterval=15 $CompressedTarFile "${ServerUser}@${ServerHost}:${ServerPath}/" | Out-Null
+        scp -P $ServerPort -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 $CompressedTarFile "${ServerUser}@${ServerHost}:${ServerPath}/" | Out-Null
         if ($LASTEXITCODE -eq 0) {
             $uploadSuccess = $true
         }
@@ -158,7 +157,7 @@ $RemoteProxyConfig = "$ServerPath/apimobie.chuyendoisovn.com.vn"
 if (Test-Path $ProxyConfig) {
     Write-Host "`nUploading Nginx upload/timeout configuration..." -ForegroundColor Yellow
     ssh @SshOptions "$ServerUser@$ServerHost" "mkdir -p $ServerPath/nginx"
-    scp -P $ServerPort -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ProxyConfig "${ServerUser}@${ServerHost}:$RemoteProxyConfig"
+    scp -P $ServerPort -o StrictHostKeyChecking=yes -o ConnectTimeout=10 $ProxyConfig "${ServerUser}@${ServerHost}:$RemoteProxyConfig"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Failed to upload Nginx vhost configuration." -ForegroundColor Red
         exit 1

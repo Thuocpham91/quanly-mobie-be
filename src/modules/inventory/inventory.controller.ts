@@ -23,6 +23,14 @@ export class InventoryController {
     return this.inventoryService.getInventorySummary(branchId);
   }
 
+  @Get('products/:productId/available-imeis')
+  getAvailableImeis(@Param('productId') productId: string, @Request() req) {
+    return this.inventoryService.getAvailableImeis(
+      productId,
+      req.headers['x-branch-id'],
+    );
+  }
+
   @Get('history')
   getStockHistory(
     @Query('branchId') branchId?: string,
@@ -221,4 +229,3 @@ export class InventoryController {
     return this.inventoryService.deleteImportOrder(id);
   }
 }
-
